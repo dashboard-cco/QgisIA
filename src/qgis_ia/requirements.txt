@@ -1,0 +1,4 @@
+# Só para o PAINEL DE CHAT. O modo servidor MCP não precisa de nada
+# além da biblioteca padrão do Python.
+anthropic>=0.25.0
+openai>=1.0.0

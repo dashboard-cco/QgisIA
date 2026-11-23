@@ -1,0 +1,15 @@
+[general]
+name=QGIS_IA
+description=Assistente de IA no QGIS: chat no painel e servidor MCP para Claude Desktop / Claude Code operarem o projeto.
+about=QGIS_IA integra IA ao QGIS de duas formas. (1) Painel de chat: descreva a tarefa em linguagem natural e o plugin executa ações predefinidas (camadas, geoprocessamento, layout, expressões). (2) Servidor MCP: expõe o QGIS por Model Context Protocol para o Claude Desktop, Claude Code ou outro cliente MCP operarem o projeto aberto. O servidor escuta apenas em 127.0.0.1, exige token e tem modo somente leitura.
+version=2.0.0
+qgisMinimumVersion=3.40
+author=Usuario QGIS_IA
+email=contato@example.com
+repository=https://github.com/seu-usuario/qgis-ia
+tracker=https://github.com/seu-usuario/qgis-ia/issues
+icon=icon.svg
+tags=ia,mcp,claude,anthropic,automacao,pyqgis,agente
+category=Plugins
+experimental=True
+hasProcessingProvider=False
