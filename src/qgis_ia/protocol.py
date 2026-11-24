@@ -24,6 +24,8 @@ MUTATING = frozenset({
     "add_field", "delete_field", "rename_field", "delete_selected_features",
     "commit_edits", "rollback_edits", "undo_edit", "redo_edit",
     "export_layout", "export_map_image", "remove_layout", "save_layer_as",
+    "save_layer_to_project", "create_layer", "load_files", "create_group", "move_layer_to_group",
+    "set_layer_crs", "copy_style",
 })
 
 # Execução de Python arbitrário: tem uma chave própria no painel, separada do

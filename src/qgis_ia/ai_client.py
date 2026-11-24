@@ -253,10 +253,25 @@ AÇÕES DISPONÍVEIS (use exatamente estes nomes):
 70. get_field_statistics params: {"layer_name": "lotes", "field": "pop"};  get_unique_values {"layer_name", "field"}
 71. save_layer_as        params: {"layer_name": "lotes", "format": "gpkg|shp|geojson|csv|kml|dxf|xlsx", "output_path": "opcional"}
 
+--- CAMADAS ---
+
+72. save_layer_to_project params: {"layer_name": "<camada ativa>", "output_name": "opcional"}
+    Grava na pasta do projeto IGUAL aos outros arquivos (mesma pasta, formato e sistema);
+    camada temporária é trocada pela gravada. Use para "salvar camada", "tornar permanente".
+73. create_layer         params: {"name": "postes", "geometry_type": "point|line|polygon|none",
+    "fields": [{"name": "nome", "type": "string|integer|double|date|boolean"}], "crs": "opcional", "temporary": false}
+74. load_files           params: {"path": "C:/dados/lotes.shp ou uma pasta ou um .gdb"}
+75. create_group {"name"}; move_layer_to_group {"layer_name", "group"}
+76. set_layer_crs        params: {"layer_name", "crs": "EPSG:31983"}  (só corrige a etiqueta; converter = reproject)
+77. copy_style           params: {"from_layer": "Regiões", "to_layer": "<camada ativa>"}
+78. project_storage_info params: {}
+
 COMO O USUÁRIO COSTUMA FALAR (traduza para as ações acima):
 - "buffer / área de influência de X m"  -> geoprocess buffer; "recortar pela camada X"  -> clip;
   "dissolver / juntar tudo"  -> dissolve; "trazer atributos de X"  -> spatial_join;
   "contar pontos de X em cada polígono"  -> count_points; "exportar camada em shp"  -> save_layer_as
+- "salvar camada / salvar na pasta do projeto / tornar permanente"  -> save_layer_to_project;
+  "criar camada de pontos/linhas/polígonos X"  -> create_layer; "abrir C:/..." (caminho)  -> load_files
 - "pintar / colorir / mudar a cor"  -> update_symbol com color; "cores por X" / "colorir por X"
   -> set_categorized_style; "classificar / degradê / em N classes / tons de"  -> set_graduated_style
 - "contorno / borda"  -> update_symbol outline_color/outline_width; "transparência 30%" -> opacity 0.7
@@ -286,7 +301,7 @@ COMO O USUÁRIO COSTUMA FALAR (traduza para as ações acima):
   pelo plugin; pode planejá-las normalmente quando o usuário pedir.
 
 REGRAS:
-- Prefira as ações dedicadas (24-71; 1-21 só se faltar algo) quando existir uma para a tarefa.
+- Prefira as ações dedicadas (24-78; 1-21 só se faltar algo) quando existir uma para a tarefa.
 - Se a tarefa pedida não corresponder a nenhuma ação dedicada, use list_algorithms
   para encontrar o algoritmo certo e depois run_algorithm para executá-lo — NUNCA
   diga que algo "não é possível" sem antes tentar essa rota genérica.

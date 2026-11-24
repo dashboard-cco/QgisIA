@@ -45,6 +45,14 @@ def _resumo(result):
     if "comprimento_m" in r:
         return (f"Comprimento total de '{r['layer']}' ({r['feicoes']} feições): "
                 f"{n(r['comprimento_m'])} m = {n(r['comprimento_km'], 3)} km")
+    if "geometry_type" in r and "source" in r:  # informações da camada
+        fonte = r["source"].split("|")[0] if r.get("source") else ""
+        campos = ", ".join(f["name"] for f in r.get("fields", [])) or "nenhum"
+        return (f"'{r['name']}': {r['geometry_type']}, {n(r.get('feature_count'))} feições "
+                f"({r.get('selected_count')} selecionadas) · sistema {r.get('crs')} · "
+                f"{'em edição · ' if r.get('is_editing') else ''}"
+                f"{'filtro: ' + r['filter'] + ' · ' if r.get('filter') else ''}"
+                f"arquivo: {fonte or '(temporária, só na memória)'} · campos: {campos}")
     if "fields" in r and r.get("fields") and isinstance(r["fields"][0], dict):
         return (f"Campos de '{r.get('layer')}' ({r.get('feature_count')} feições): "
                 + ", ".join(f"{f['name']} ({f['type']})" for f in r["fields"]))
@@ -57,6 +65,10 @@ def _resumo(result):
                ("feature_count", "total de feições"), ("editing", "em edição"),
                ("selected", "selecionadas"), ("output_path", "arquivo"),
                ("campo_criado", "campo com a contagem"), ("campo_distancia", "campo com a distância"),
+               ("formato", "formato"), ("sistema", "sistema"), ("antes", "sistema anterior"),
+               ("pasta", "pasta"), ("geopackage", "geopackage"), ("camadas_em_arquivo", "camadas em arquivo"),
+               ("acao", "camada"), ("adicionadas", "camadas abertas"), ("grupo", "grupo"),
+               ("estilo_de", "estilo copiado de"),
                ("aviso", "aviso")]
     for chave, rot in rotulos:
         if chave in r and r[chave] is not None and r[chave] is not True:

@@ -1879,6 +1879,204 @@ def _salvar_camada(m, ctx):
     return _plano(f"Gravar '{camada}' em {fmt.upper()} ({onde})", "save_layer_as", params)
 
 
+# ============================================================ camadas
+# Salvar na pasta do projeto (igual aos outros arquivos), criar, abrir, grupos,
+# sistema de coordenadas, estilo e informações.
+
+_V_GUARDAR = _alt("salvar", "salve", "salva", "gravar", "grave", "grava", "guardar", "guarde", "guarda")
+_DEST_PROJ = _alt("na pasta do projeto", "para a pasta do projeto", "pra pasta do projeto", "na pasta",
+                  "no projeto", "junto do projeto", "junto com o projeto", "igual aos outros",
+                  "igual às outras", "igual as outras", "como os outros", "de vez", "permanente",
+                  "permanentemente", "em definitivo", "definitivo")
+_PERMANENTE = _alt("tornar permanente", "torne permanente", "torna permanente", "deixar permanente",
+                   "deixe permanente", "tornar a camada permanente", "torne a camada permanente",
+                   "deixar a camada permanente", "deixe a camada permanente")
+
+
+@comando(r"(?:" + _V_GUARDAR + r"\s+" + ART + r"(?:" + _k("camada") + r"(?P<a>(?:\s.*?)?)|(?P<b>.*?"
+         + _DEST_PROJ + r".*?))|" + _PERMANENTE + r"(?P<c>.*?))", "salvar camada na pasta do projeto",
+         primeiro=True)
+def _salvar_no_projeto(m, ctx):
+    resto = " " + " ".join(g for g in (m.group("a"), m.group("b"), m.group("c")) if g) + " "
+    if re.search(_FMT_CAMADA + r"(?=\s)", resto, re.I) or re.search(r"[A-Za-z]:[\\/]|\\\\", resto) or \
+            re.search(N_LAYOUT + "|" + _alt("edição", "edicao", "edições", "alterações", "selecionadas", "seleção")
+                      + r"|\b(?:pdf|png|jpg|svg|tif)\b", resto, re.I):
+        return None  # formato/caminho/seleção: exportar cópia (save_layer_as); edição/layout: outro comando
+    resto, _ = _tirar(r"\s" + _DEST_PROJ + r"(?=\s)", resto)
+    params = {}
+    mc = re.search(_COMO, resto, re.I)
+    if mc:
+        params["output_name"] = _limpa(mc.group("saida"))
+        resto = resto[:mc.start()]
+    if re.search(r"\bprojeto\b", resto, re.I):
+        return None  # 'salvar o projeto' tem comando próprio
+    camada = _sem_camada_propria(resto, ctx)
+    params["layer_name"] = camada
+    nome = f" como '{params['output_name']}'" if "output_name" in params else ""
+    return _plano(f"Salvar '{camada}'{nome} na pasta do projeto, no mesmo formato e sistema dos outros "
+                  "arquivos do projeto", "save_layer_to_project", params)
+
+
+_GEOMS = [
+    (_alt("multipontos", "multiponto"), "multipoint", "multipontos"),
+    (_alt("multilinhas", "multilinha"), "multiline", "multilinhas"),
+    (_alt("multipolígonos", "multipoligonos", "multipolígono", "multipoligono"), "multipolygon", "multipolígonos"),
+    (_alt("pontos", "ponto", "pontual", "pontuais"), "point", "pontos"),
+    (_alt("linhas", "linha", "linear", "lineares"), "line", "linhas"),
+    (_alt("polígonos", "poligonos", "polígono", "poligono", "áreas", "areas", "área", "area", "poligonal"),
+     "polygon", "polígonos"),
+    (_alt("tabela", "sem geometria", "só tabela", "só atributos"), "none", "tabela"),
+]
+_GEOM_ALT = "(?:" + "|".join(p for p, _, _ in _GEOMS) + ")"
+_TIPO_CRIAR = {"String": "string", "Integer": "integer", "Long": "long", "Double": "double",
+               "Date": "date", "DateTime": "datetime", "Boolean": "boolean"}
+_TEMP = _alt("temporária", "temporaria", "temporário", "temporario", "na memória", "na memoria",
+             "em memória", "em memoria", "só na memória", "provisória", "provisoria")
+
+
+@comando(r"(?:" + V_CRIAR + r")\s+" + ART + r"(?:" + _alt("nova", "novo") + r"\s+)?(?P<n>" + _k("camada")
+         + "|" + _k("tabela") + r")(?:\s+(?P<resto>.*?))?", "criar camada de pontos chamada postes", primeiro=True)
+def _criar_camada(m, ctx):
+    resto = " " + (m.group("resto") or "") + " "
+    if re.match(r"\s*(?:" + _alt("de buffer", "de centroides", "de centróides", "de vértices", "de vertices",
+                                  "de grade", "de envoltória") + r")\s", resto, re.I):
+        return None  # 'criar camada de centroides' -> geoprocessamento
+    params = {}
+    resto, mt = _tirar(r"\s,?\s*\(?" + _TEMP + r"\)?(?=\s)", resto)
+    if mt:
+        params["temporary"] = True
+    # campos: tudo depois de 'com (os) campos'
+    mf = re.search(r"\s(?:com|e)\s+(?:(?:o|os)\s+)?" + N_CAMPO + r"\s*:?\s+(?P<f>.*)$", resto, re.I)
+    if mf:
+        trecho = mf.group("f")
+        resto = resto[:mf.start()] + " "
+        campos = []
+        for q in re.finditer(r'"([^"]+)"\s*(?:\(?\s*(?:(?:do\s+)?tipo\s+|como\s+|de\s+)?(?P<t>' + _TIPO_ALT
+                             + r")(?![\w])\s*\)?)?", trecho, re.I):
+            tipo = _tipo(q.group("t"))[0] if q.group("t") else "String"
+            campos.append({"name": q.group(1).strip(), "type": _TIPO_CRIAR[tipo]})
+        if not campos:
+            raise ErroComando(MSG_ASPAS.format(
+                'criar camada de pontos postes com campos "nome" texto e "altura" decimal'))
+        params["fields"] = campos
+    # sistema de coordenadas
+    for ms in re.finditer(r"\s(?:em|no|sistema|crs|" + _k("no sistema") + "|" + _k("projeção")
+                          + r")\s+(?P<c>.+?)(?=\s+(?:" + _alt("chamada", "chamado", "com o nome", "como", "nomeada")
+                          + r")\s|\s*$)", resto, re.I):
+        crs = _crs_txt(ms.group("c"))
+        if crs:
+            params["crs"] = crs
+            resto = resto[:ms.start()] + " " + resto[ms.end():]
+            break
+    # geometria
+    mg = re.search(r"(?:^|\s)(?:(?:de|com|do tipo|tipo|para)\s+)?(?P<g>" + _GEOM_ALT + r")(?=\s|$)", resto, re.I)
+    if sem_acento(m.group("n")).startswith("tabela"):
+        geom, rot = "none", "tabela"
+    elif mg:
+        geom, rot = next((g, r) for p, g, r in _GEOMS if re.fullmatch(p, mg.group("g"), re.I))
+        resto = resto[:mg.start()] + " " + resto[mg.end():]
+    else:
+        raise ErroComando("Diga o tipo da camada: criar camada de pontos · de linhas · de polígonos · "
+                          "criar tabela (sem geometria).")
+    # nome
+    mn = re.search(r"(?:^|\s)(?:" + _alt("chamada", "chamado", "com o nome de", "com o nome", "com nome",
+                                         "nomeada", "nomeado", "como", "de nome") + r")\s+(?P<nome>.+)$", resto, re.I)
+    if mn:
+        sobra = resto[:mn.start()].strip()
+        if sobra:
+            raise ErroComando(f"Não entendi '{sobra}'. Ex.: criar camada de pontos chamada postes.")
+        nome = _limpa(mn.group("nome"))
+    else:
+        nome = _limpa(" ".join(resto.split()))
+    nome = nome or {"point": "pontos", "line": "linhas", "polygon": "poligonos", "none": "tabela"}.get(
+        geom, geom) + "_novos"
+    if nome in ctx.get("camadas", []):
+        raise ErroComando(f"Já existe a camada '{nome}'. Escolha outro nome: ... chamada {nome}_2")
+    params.update(name=nome, geometry_type=geom)
+    campos_txt = (" com " + ", ".join(f"'{c['name']}'" for c in params["fields"])) if params.get("fields") else ""
+    onde = " (temporária)" if params.get("temporary") else " na pasta do projeto"
+    return _plano(f"Criar a camada de {rot} '{nome}'{campos_txt}{onde}, pronta para desenhar",
+                  "create_layer", params)
+
+
+@comando(r"(?:" + _alt("abrir", "abra", "abre", "carregar", "carregue", "carrega", "adicionar", "adicione",
+                       "adiciona", "importar", "importe", "importa", "trazer", "traga")
+         + r")\s+(?P<pre>.*?)(?P<p>[A-Za-z]:[\\/].*|\\\\.+)", r"abrir C:\dados\lotes.shp", primeiro=True)
+def _abrir_arquivo(m, ctx):
+    caminho = m.group("p").strip().strip('"').rstrip(" .")
+    pasta = not os.path.splitext(caminho)[1] or caminho.lower().rstrip("\\/").endswith(".gdb")
+    return _plano(f"Abrir {'os arquivos de' if pasta else 'o arquivo'} {caminho}", "load_files", {"path": caminho})
+
+
+_GRUPO = _alt("grupo", "pasta de camadas")
+
+
+@comando(r"(?:" + V_CRIAR + r")\s+" + ART + r"(?:" + _alt("novo") + r"\s+)?" + _GRUPO
+         + r"(?:\s+(?:" + _alt("chamado", "com o nome", "de nome", "nomeado") + r"))?\s+(?P<nome>.+?)",
+         "criar grupo Coleta", primeiro=True)
+def _criar_grupo(m, ctx):
+    nome = _limpa(m.group("nome"))
+    return _plano(f"Criar o grupo '{nome}' no painel de camadas", "create_group", {"name": nome})
+
+
+@comando(r"(?:" + _alt("mover", "mova", "move", "colocar", "coloque", "coloca", "pôr", "ponha", "põe",
+                       "jogar", "jogue", "levar", "leve", "passar", "passe") + r")(?:\s+(?P<c>.*?))?\s+(?:"
+         + _alt("para o", "pro", "no", "dentro do", "ao", "para") + r")\s+" + _GRUPO + r"\s+(?P<g>.+?)",
+         "mover para o grupo Coleta", primeiro=True)
+def _mover_grupo(m, ctx):
+    camada = _sem_camada_propria(m.group("c") or "", ctx)
+    grupo = _limpa(m.group("g"))
+    return _plano(f"Pôr '{camada}' no grupo '{grupo}'", "move_layer_to_group",
+                  {"layer_name": camada, "group": grupo})
+
+
+@comando(r"(?:" + _alt("definir", "defina", "define", "atribuir", "atribua", "atribui", "corrigir", "corrija",
+                       "corrige", "informar", "informe", "setar", "sete") + r")\s+" + ART
+         + r"(?:" + _alt("sistema de coordenadas", "sistema de referência", "sistema", "crs", "src", "projeção",
+                         "projecao", "epsg") + r")(?:\s+(?:" + _alt("da camada", "na camada", "desta camada") + r"))?"
+         + r"\s+(?:(?:como|para|pra|em|=|igual a)\s+)?(?P<crs>.+?)", "definir sistema 31983", primeiro=True)
+def _definir_crs(m, ctx):
+    crs = _crs_txt(m.group("crs"))
+    if crs is None:
+        raise ErroComando("Sistema não reconhecido. Ex.: definir sistema 31983 · definir sistema SIRGAS 2000 UTM 23S.")
+    camada = _ativa(ctx)
+    return _plano(f"Definir o sistema de '{camada}' como {crs} (só a etiqueta: as coordenadas não mudam; "
+                  "para converter use 'reprojetar para ...')", "set_layer_crs", {"layer_name": camada, "crs": crs})
+
+
+@comando(r"(?:(?:" + _alt("copiar", "copie", "copia", "usar", "use", "usa", "aplicar", "aplique", "aplica", "pegar",
+                          "pegue", "pega", "deixar com", "deixe com") + r")\s+" + ART
+         + r"(?:" + _alt("mesmo", "mesma") + r"\s+)?|" + _alt("mesmo", "o mesmo") + r"\s+)(?:"
+         + _alt("estilo", "simbologia", "visual") + r")\s+(?:(?:" + _alt("igual ao", "igual à", "igual a")
+         + r")\s+)?(?:" + _alt("de", "da", "do", "dos", "das") + r")\s+(?P<outra>.+?)",
+         "copiar estilo de Regiões", primeiro=True)
+def _copiar_estilo(m, ctx):
+    outra = _outra(m.group("outra"), ctx)
+    camada = _ativa(ctx)
+    return _plano(f"Copiar o estilo de '{outra}' para '{camada}'", "copy_style",
+                  {"from_layer": outra, "to_layer": camada})
+
+
+@comando(r"(?:(?:" + _alt("informações", "informacoes", "informação", "informacao", "info", "infos", "propriedades",
+                          "detalhes", "sobre") + r")(?:\s+(?:" + _alt("da camada", "sobre a camada", "desta camada",
+                                                                     "da camada selecionada", "da camada ativa", "camada")
+         + r"))?|(?:" + _alt("qual o sistema", "qual é o sistema", "qual sistema", "qual a projeção", "qual o crs",
+                             "onde está salva", "onde esta salva", "onde fica o arquivo", "que tipo de camada")
+         + r")(?:\s+(?:" + _alt("da camada", "desta camada", "a camada", "ela", "dela") + r"))?)\??",
+         "informações da camada")
+def _info_camada(m, ctx):
+    camada = _ativa(ctx)
+    return _plano(f"Informações da camada '{camada}'", "get_layer_info", {"layer_name": camada})
+
+
+@comando(r"(?:" + _alt("como o projeto salva", "como o projeto grava", "como o projeto guarda", "onde o projeto salva",
+                       "padrão do projeto", "padrao do projeto", "formato do projeto", "pasta do projeto",
+                       "onde salvar", "qual a pasta do projeto", "qual o formato do projeto",
+                       "sistema do projeto", "qual o sistema do projeto") + r")\??", "padrão do projeto", primeiro=True)
+def _padrao_projeto(m, ctx):
+    return _plano("Ver como o projeto guarda os dados (pasta, formato e sistema)", "project_storage_info", {})
+
+
 # --- visibilidade (por último: 'mostrar X' é bem genérico)
 @comando(r"(?P<v>" + _alt("esconder", "esconda", "esconde", "ocultar", "oculte", "oculta", "desligar",
                           "desligue", "desliga", "mostrar", "mostre", "mostra", "exibir", "exiba", "exibe",

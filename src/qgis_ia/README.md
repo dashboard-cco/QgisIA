@@ -56,7 +56,7 @@ o servidor, o arquivo é apagado e o token deixa de valer.
 - As ações rodam no thread principal do QGIS. Operações pesadas deixam a interface
   parada enquanto executam.
 
-## As ferramentas (79)
+## As ferramentas (91)
 
 **Inspeção** — `ping`, `get_project_info`, `get_layer_info`, `get_features`,
 `get_field_statistics`, `get_unique_values`, `get_raster_stats`, `get_algorithm_help`,
@@ -97,6 +97,20 @@ satélite/híbrido), `move_layer`, `zoom_full`, `set_scale`, `export_map_image`
 | Mapa | `zoom total` · `escala 1:5000` · `trazer lotes para frente` · `esconder camada vias` · `salvar projeto` |
 | Layout | `criar layout A3 retrato com título "Coleta 2026"` · `criar layout sem legenda` · `adicionar texto "Fonte: SLU" no layout` |
 | Exportar | `exportar layout em pdf` · `exportar layout Mapa em png com 150 dpi para C:\saida` · `salvar mapa em pdf` (cria o layout se não houver) · `salvar imagem do mapa` |
+
+**Camadas** — `save_layer_to_project`, `project_storage_info`, `create_layer`, `load_files`,
+`create_group`, `move_layer_to_group`, `set_layer_crs`, `copy_style`
+
+### Comandos simples de camadas (valem para a camada selecionada)
+
+| Assunto | Exemplos |
+|---|---|
+| Salvar no projeto | `salvar camada` · `salvar na pasta do projeto` · `tornar permanente` · `salvar camada como coleta_2026` — grava igual aos outros arquivos do projeto (mesma pasta, formato — o mesmo GeoPackage — e sistema); a temporária é trocada pela gravada |
+| Criar | `criar camada de pontos chamada postes` · `criar camada de linhas vias_novas com campos "nome" texto e "largura" decimal` · `criar camada de polígonos em 4326` · `criar camada de pontos temporária` · `criar tabela controle` |
+| Abrir | `abrir C:\dados\lotes.shp` · `abrir C:\dados\base.gpkg` (todas as tabelas) · `abrir E:\Gdb\SLU.gdb` · `abrir C:\dados\Shp` (todos os arquivos da pasta) |
+| Organizar | `criar grupo Coleta` · `mover para o grupo Coleta` |
+| Sistema | `definir sistema 31983` (só corrige a etiqueta) · `reprojetar para 31983` (converte as coordenadas) |
+| Estilo e info | `copiar estilo de Regiões` · `informações da camada` · `qual o sistema da camada?` · `padrão do projeto` |
 
 **Avançado** — `execute_code` (desligada por padrão)
 

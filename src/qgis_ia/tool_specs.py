@@ -399,6 +399,41 @@ TOOLS = {
         _obj({"layer_name": _LAYER, "output_path": _S, "format": _S, "only_selected": _B},
              ["layer_name"])),
 
+    # ----------------------------------------------------------- camadas
+    "save_layer_to_project": (
+        "Grava a camada na pasta do projeto IGUAL aos outros arquivos do projeto: mesma pasta, "
+        "mesmo formato (o mesmo GeoPackage, se for o caso) e mesmo sistema de coordenadas. "
+        "Camada temporária é trocada pela gravada (mesmo nome, estilo e posição). [grava arquivo]",
+        _obj({"layer_name": _LAYER, "output_name": _S, "keep_temporary": _B}, ["layer_name"])),
+    "project_storage_info": (
+        "Como o projeto guarda os dados: pasta, formato, GeoPackage e sistema mais usados.", _obj()),
+    "create_layer": (
+        "Cria camada nova vazia, pronta para desenhar (entra em edição). Por padrão grava na pasta "
+        "do projeto no formato e sistema do projeto; temporary=true cria só na memória. [grava arquivo]",
+        _obj({"name": _S,
+              "geometry_type": {"type": "string", "enum": ["point", "line", "polygon", "multipoint",
+                                                           "multiline", "multipolygon", "none"]},
+              "fields": {"type": "array", "items": _obj({"name": _S, "type": {"type": "string", "enum": [
+                  "string", "integer", "long", "double", "date", "datetime", "boolean"]}}, ["name"])},
+              "crs": _s("Ex.: EPSG:31983; vazio = sistema dos arquivos do projeto"),
+              "temporary": _B, "start_editing": _B},
+             ["name"])),
+    "load_files": (
+        "Abre no projeto um arquivo (shp, gpkg — todas as tabelas —, geojson, kml, csv, tif...), "
+        "uma pasta .gdb ou todos os arquivos de mapa de uma pasta.",
+        _obj({"path": _S}, ["path"])),
+    "create_group": ("Cria um grupo no painel de camadas.", _obj({"name": _S}, ["name"])),
+    "move_layer_to_group": (
+        "Põe a camada dentro de um grupo do painel (cria o grupo se não existir).",
+        _obj({"layer_name": _LAYER, "group": _S}, ["layer_name", "group"])),
+    "set_layer_crs": (
+        "DEFINE o sistema de coordenadas da camada sem mexer nas coordenadas (corrigir etiqueta "
+        "errada). Para converter coordenadas use geoprocess reproject.",
+        _obj({"layer_name": _LAYER, "crs": _S}, ["layer_name", "crs"])),
+    "copy_style": (
+        "Copia o estilo inteiro (cores, classes, rótulos) de uma camada para outra.",
+        _obj({"from_layer": _S, "to_layer": _LAYER}, ["from_layer", "to_layer"])),
+
     # ----------------------------------------------------------- avançado
     "execute_code": (
         "Executa código PyQGIS arbitrário no QGIS e devolve o que foi impresso. "
