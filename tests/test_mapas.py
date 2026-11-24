@@ -55,11 +55,16 @@ def ctx():
     proj = QgsProject.instance()
     return {"camadas": [l.name() for l in proj.mapLayers().values()],
             "campos": {l.name(): [f.name() for f in l.fields()] for l in proj.mapLayers().values()},
-            "ativa": "lotes",
+            "ativa": SEL[0],
             "layouts": [l.name() for l in proj.layoutManager().printLayouts()]}
 
 
-def rodar(frase, deve_funcionar=True):
+SEL = ["lotes"]  # camada selecionada no painel de camadas
+
+
+def rodar(frase, deve_funcionar=True, sel=None):
+    if sel:
+        SEL[0] = sel
     plano = comandos.interpretar(frase, ctx())
     check(plano is not None, f"não reconheceu: {frase}")
     if plano is None:
@@ -78,35 +83,35 @@ def simbolo(layer):
 
 
 # --- cor, contorno, tamanho
-rodar("pintar lotes de azul")
+rodar("pintar de azul")
 check(isinstance(lotes.renderer(), QgsSingleSymbolRenderer), "pintar: símbolo único")
 check(simbolo(lotes).color().name() == "#1f78b4", f"pintar: cor {simbolo(lotes).color().name()}")
-rodar("contorno preto de 0.6 em lotes")
+rodar("contorno preto de 0.6")
 sl = simbolo(lotes).symbolLayer(0)
 check(sl.strokeColor().name() == "#000000" and abs(sl.strokeWidth() - 0.6) < 1e-6,
       f"contorno: {sl.strokeColor().name()} {sl.strokeWidth()}")
 check(simbolo(lotes).color().name() == "#1f78b4", "contorno não pode mudar a cor de preenchimento")
-rodar("espessura 1.2 em vias")
+rodar("espessura 1.2", sel="vias")
 check(abs(simbolo(vias).width() - 1.2) < 1e-6, f"espessura da linha: {simbolo(vias).width()}")
-rodar("deixar lotes sem preenchimento")
+rodar("deixar sem preenchimento", sel="lotes")
 check(simbolo(lotes).color().alpha() == 0, "sem preenchimento")
-rodar("pintar vias de vermelho")
+rodar("pintar de vermelho", sel="vias")
 check(simbolo(vias).color().name() == "#e31a1c", "linha vermelha")
 
 # --- transparência
-rodar("transparência 30% em lotes")
+rodar("transparência 30%", sel="lotes")
 check(abs(lotes.opacity() - 0.7) < 1e-6, f"opacidade {lotes.opacity()}")
 
 # --- cores por campo
-rodar("cores por bairro em lotes")
+rodar('cores por "bairro"')
 r = lotes.renderer()
 check(isinstance(r, QgsCategorizedSymbolRenderer) and len(r.categories()) == 3,
       "categorizado por bairro com 3 classes")
-rodar("contorno branco em lotes")
+rodar("contorno branco")
 check(all(c.symbol().symbolLayer(0).strokeColor().name() == "#ffffff" for c in lotes.renderer().categories()),
       "contorno em todas as categorias, sem desfazer o categorizado")
 check(isinstance(lotes.renderer(), QgsCategorizedSymbolRenderer), "categorizado mantido após contorno")
-rodar("classificar lotes por pop em 3 classes em tons de vermelho")
+rodar('classificar por "pop" em 3 classes em tons de vermelho')
 r = lotes.renderer()
 check(isinstance(r, QgsGraduatedSymbolRenderer) and len(r.ranges()) == 3, "graduado por pop em 3 classes")
 rodar("cores por área em 4 classes quantil")
@@ -115,24 +120,24 @@ check(isinstance(r, QgsGraduatedSymbolRenderer) and r.classAttribute() == "$area
       f"graduado por expressão $area: {getattr(r, 'classAttribute', lambda: None)()}")
 
 # --- rótulos
-rodar("rótulos com bairro tamanho 12 negrito")
+rodar('rótulos com "bairro" tamanho 12 negrito')
 check(lotes.labelsEnabled() and lotes.labeling().settings().fieldName == "bairro", "rótulos ligados")
 fmt = lotes.labeling().settings().format()
 check(fmt.font().bold() and abs(fmt.size() - 12) < 1e-6 and fmt.buffer().enabled(),
       "rótulo negrito, 12, com halo")
 rodar('rótulos com "bairro" || \' (\' || "pop" || \')\'')
 check(lotes.labeling().settings().isExpression, "rótulo por expressão")
-rodar("tirar rótulos de lotes")
+rodar("tirar rótulos")
 check(not lotes.labelsEnabled(), "rótulos desligados")
 
 # --- ordem e visibilidade
 root = QgsProject.instance().layerTreeRoot()
-rodar("mandar lotes para trás")
+rodar("mandar para trás")
 check(root.layerOrder()[-1].name() == "lotes" if root.layerOrder() else False,
       f"lotes no fundo: {[l.name() for l in root.layerOrder()]}")
-rodar("trazer lotes para frente")
+rodar("trazer para frente")
 check([n.name() for n in root.findLayers()][0] == "lotes", "lotes na frente")
-rodar("esconder camada vias")
+rodar("esconder camada", sel="vias")
 check(not root.findLayer(vias.id()).isVisible(), "vias escondida")
 rodar("mostrar todas as camadas")
 check(root.findLayer(vias.id()).isVisible(), "todas visíveis")

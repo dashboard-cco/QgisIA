@@ -2,7 +2,7 @@
 """
 Comandos simples em português, interpretados SEM IA.
 
-    interpretar("criar campo area tipo decimal na camada lotes", ctx)
+    interpretar('criar campo "area" tipo decimal', ctx)
     -> {"descricao": "Criar o campo 'area' (Decimal) na camada 'lotes'",
         "steps": [{"action": "add_field", "params": {...}}],
         "destrutivo": False}
@@ -13,6 +13,13 @@ nenhum comando (devolve None) segue para a IA.
 
 ctx = {"camadas": [nomes], "campos": {camada: [campos]}, "ativa": nome ou None,
        "layouts": [nomes dos layouts de impressão]}
+
+REGRAS (pedido do usuário, 2026-11-24):
+  1. Os comandos valem só para a CAMADA SELECIONADA no painel de camadas
+     (ctx["ativa"]). Não precisa dizer a camada; citar outra camada dá erro.
+  2. Nome de campo/coluna vai SEMPRE entre aspas duplas: criar campo "area".
+     Sem aspas: "Edição de campos: escreva o nome do campo entre aspas".
+     Em condições, area/comprimento sem aspas = medida da geometria.
 
 Sem dependências do QGIS, para poder ser testado sozinho.
 """
@@ -57,7 +64,7 @@ def _limpa(nome):
     return nome.strip("“”").strip()
 
 
-ATIVA = {"", "ativa", "a ativa", "camada ativa", "a camada ativa", "atual", "a atual",
+ATIVA = {"", "camada", "a camada", "da camada", "na camada", "ativa", "a ativa", "camada ativa", "a camada ativa", "atual", "a atual",
          "camada atual", "esta", "essa", "esta camada", "essa camada", "nesta", "nessa",
          "selecionada", "camada selecionada", "a camada selecionada"}
 
@@ -145,18 +152,56 @@ def _achar(nome, opcoes, oque, parcial=True):
     raise ErroComando(f"Não achei {oque} '{_limpa(nome)}'. Opções: {lista}.")
 
 
+MSG_SELECIONE = ("Nenhuma camada selecionada. Clique na camada no painel de Camadas "
+                 "e repita o comando (não precisa dizer o nome dela).")
+
+
+def _ativa(ctx):
+    if not ctx.get("ativa"):
+        raise ErroComando(MSG_SELECIONE)
+    return ctx["ativa"]
+
+
+def _so_ativa(camada, ctx):
+    """Regra 1: o comando só vale para a camada selecionada."""
+    ativa = _ativa(ctx)
+    if camada != ativa:
+        raise ErroComando(f"Os comandos valem só para a camada selecionada ('{ativa}'). "
+                          f"Para mexer em '{camada}', clique nela no painel de Camadas e repita.")
+    return camada
+
+
 def _camada(nome, ctx):
     nome = _limpa(nome)
     if sem_acento(nome) in ATIVA:
-        if not ctx.get("ativa"):
-            raise ErroComando("Nenhuma camada ativa. Diga o nome da camada "
-                              "(ex.: '... na camada lotes') ou clique nela no painel de camadas.")
-        return ctx["ativa"]
-    return _achar(nome, ctx.get("camadas", []), "a camada")
+        return _ativa(ctx)
+    return _so_ativa(_achar(nome, ctx.get("camadas", []), "a camada"), ctx)
 
 
 def _campo(nome, camada, ctx):
-    return _achar(nome, ctx.get("campos", {}).get(camada, []), f"o campo (em '{camada}')")
+    return _achar(nome, ctx.get("campos", {}).get(camada, []), f"o campo (em '{camada}')",
+                  parcial=False)
+
+
+MSG_ASPAS = "Edição de campos: escreva o nome do campo entre aspas. Ex.: {}"
+_RE_ASPAS = r'"([^"]+)"'
+
+
+def _aspas(txt):
+    """Nomes entre aspas duplas, na ordem em que aparecem."""
+    return re.findall(_RE_ASPAS, txt or "")
+
+
+def _sem_aspas(txt):
+    """Texto sem os trechos entre aspas duplas."""
+    return re.sub(_RE_ASPAS, " ", txt or "")
+
+
+def _exige_aspas(txt, exemplo, minimo=1):
+    nomes = _aspas(txt)
+    if len(nomes) < minimo:
+        raise ErroComando(MSG_ASPAS.format(exemplo))
+    return nomes
 
 
 def _camada_de(txt, ctx):
@@ -195,10 +240,10 @@ def _separar_camada(texto, ctx, obrigatoria=False):
     for m in re.finditer(rf"\s+{_PREP}\s+", texto, re.I):
         cand = texto[m.end():]
         try:
-            return texto[:m.start()].strip(), _achar(cand, ctx.get("camadas", []), "a camada",
-                                                     parcial=False)
+            achada = _achar(cand, ctx.get("camadas", []), "a camada", parcial=False)
         except ErroComando:
             continue
+        return texto[:m.start()].strip(), _so_ativa(achada, ctx)
     if obrigatoria:
         return texto, _camada("", ctx)
     return texto, None
@@ -233,27 +278,32 @@ _GEOMETRIA = [
 ]
 
 
+EX_CONDICAO = 'selecionar onde "bairro" igual a Centro'
+
+
 def _valor(v, campos, lado_campo=False):
     v = v.strip()
+    if lado_campo:
+        v = re.sub(rf"^{ART}(?:{_alt('campo', 'coluna')}\s+)?", "", v, flags=re.I).strip()
     if not v:
         return v
-    if v[0] in "\"'" and v[-1] == v[0] and len(v) > 1:
+    if len(v) > 1 and v[0] == '"' and v[-1] == '"':
         dentro = v[1:-1]
-        if v[0] == '"' and dentro in campos:
-            return v
-        return "'" + dentro.replace("'", "''") + "'"
+        if lado_campo:  # campo entre aspas: precisa existir
+            return '"' + _achar(dentro, list(campos), "o campo", parcial=False) + '"'
+        achados = [c for c in campos if sem_acento(c) == sem_acento(dentro)]
+        return '"' + achados[0] + '"' if achados else "'" + dentro.replace("'", "''") + "'"
+    if len(v) > 1 and v[0] == "'" and v[-1] == "'":
+        return "'" + v[1:-1].replace("'", "''") + "'"
     if re.fullmatch(r"-?\d+(?:[.,]\d+)?", v):
         return v.replace(",", ".")
-    if lado_campo:
-        v = re.sub(rf"^{ART}(?:{_alt('campo', 'coluna')}\s+)?", "", v, flags=re.I)
-    try:
-        return '"' + _achar(v, campos, "o campo", parcial=lado_campo) + '"'
-    except ErroComando:
-        pass
-    if lado_campo:  # 'area' sem campo com esse nome = área da geometria
+    if lado_campo:  # sem aspas: só medida da geometria (area, comprimento...)
         for pad, geo in _GEOMETRIA:
             if re.fullmatch(pad, v, re.I):
                 return geo
+        if re.search(r"[$@(]", v):
+            return v
+        raise ErroComando(MSG_ASPAS.format(EX_CONDICAO))
     if re.search(r"[()$@+*/]|\bnull\b|\btrue\b|\bfalse\b", v, re.I):
         return v
     return "'" + v.replace("'", "''") + "'"
@@ -273,9 +323,19 @@ def expressao(texto, campos=()):
     if not texto:
         return ""
     campos = list(campos)
-    if re.search(r'"[^"]+"\s*(=|<>|!=|>=|<=|>|<|\bilike\b|\blike\b|\bis\b|\bin\b)', texto, re.I) \
-            or re.search(r"\$\w+|@\w+|\w+\(", texto):
-        return texto
+    if re.search(r"\$\w+|@\w+|\w+\(|\b(?:ilike|like|is|in|and|or)\b", texto, re.I):
+        return texto  # já é expressão QGIS
+    guardados = []
+
+    def _guarda(m):
+        guardados.append(m.group(0))
+        return f"\x00{len(guardados) - 1}\x00"
+
+    texto = re.sub(r'"[^"]*"|\'[^\']*\'', _guarda, texto)
+
+    def _volta(t):
+        return re.sub(r"\x00(\d+)\x00", lambda m: guardados[int(m.group(1))], t)
+
     texto = re.sub(r"\b(entre\s+\S+)\s+e\s+", r"\1 __E__ ", texto, flags=re.I)
     texto = re.sub(rf"\s+{_alt('maior ou igual a', 'maior ou igual que', 'maior ou igual')}\s+", " >= ", texto, flags=re.I)
     texto = re.sub(rf"\s+{_alt('menor ou igual a', 'menor ou igual que', 'menor ou igual')}\s+", " <= ", texto, flags=re.I)
@@ -288,7 +348,7 @@ def expressao(texto, campos=()):
         if re.fullmatch(r"\s+(?:ou|or)\s+", p, re.I):
             out.append(" OR ")
             continue
-        out.append(_condicao(p.strip(), campos))
+        out.append(_condicao(_volta(p.strip()), campos))
     return "".join(out)
 
 
@@ -361,7 +421,7 @@ def _plano(descricao, action, params, destrutivo=False):
 
 # --- camadas
 @comando(rf"(?:{V_COPIAR}|{V_CRIAR}\s+uma\s+{_k('cópia')}(?:\s+d[aeo])?)(?:\s+{ART}(?:{_k('camada')})?\s*(?P<resto>.*?))?",
-         "copiar camada lotes como lotes_backup")
+         "copiar camada como lotes_backup")
 def _copiar(m, ctx):
     resto = m.group("resto") or ""
     so_sel = False
@@ -387,17 +447,17 @@ def _copiar(m, ctx):
     return _plano(f"Copiar a camada '{camada}'{alvo}{sel}", "duplicate_layer", params)
 
 
-@comando(rf"{V_RENOMEAR}\s+(?:d[ao]\s+)?{ART}{_k('camada')}\s+(?P<camada>.+?)\s+(?:para|pra|como)\s+(?P<novo>.+?)",
-         "renomear camada lotes para lotes_2026")
+@comando(rf"{V_RENOMEAR}\s+(?:d[ao]\s+)?{ART}{_k('camada')}(?:\s+(?P<camada>.+?))?\s+(?:para|pra|como)\s+(?P<novo>.+?)",
+         "renomear camada para lotes_2026")
 def _renomear_camada(m, ctx):
-    camada = _camada(m.group("camada"), ctx)
+    camada = _camada(m.group("camada") or "", ctx)
     novo = _limpa(m.group("novo"))
     return _plano(f"Renomear a camada '{camada}' para '{novo}'", "rename_layer",
                   {"layer_name": camada, "new_name": novo})
 
 
 @comando(rf"{V_APAGAR}\s+{ART}{_k('camada')}\s*(?P<camada>.*?)(?:\s+d[oa]\s+(?:projeto|mapa))?",
-         "remover camada lotes_copia")
+         "remover camada")
 def _remover_camada(m, ctx):
     camada = _camada(m.group("camada"), ctx)
     return _plano(f"Remover a camada '{camada}' do projeto (o arquivo não é apagado)",
@@ -412,9 +472,10 @@ def _listar_camadas(m, ctx):
 
 # --- campos
 @comando(rf"{V_CRIAR}\s+(?:{ART})?(?:{_alt('novo', 'nova')}\s+)?{N_CAMPO}\s+(?P<resto>.+?)",
-         "criar campo area tipo decimal na camada lotes")
+         'criar campo "area" tipo decimal')
 def _criar_campo(m, ctx):
-    resto = m.group("resto")
+    nome = _exige_aspas(m.group("resto"), 'criar campo "area" tipo decimal')[0].strip()
+    resto = " " + _sem_aspas(m.group("resto")) + " "
     tipo, rotulo, tam, prec = "String", "Texto", None, None
     mt = re.search(rf"\s+(?:{_alt('do tipo', 'de tipo', 'tipo', 'como', 'em', 'de')})\s+(?P<t>{_TIPO_ALT})(?=\s|$|,)", resto, re.I)
     if mt:
@@ -432,18 +493,14 @@ def _criar_campo(m, ctx):
         if tipo == "String":
             tipo, rotulo = "Double", "Decimal"
         resto = (resto[:mp.start()] + resto[mp.end():]).strip()
-    resto, camada = _separar_camada(resto, ctx)
+    resto, camada = _separar_camada(resto.strip(), ctx)
     camada = _ou_ativa(camada, ctx)
-    nome = _limpa(resto)
-    if not mt:  # 'criar campo area decimal': a última palavra é o tipo
-        mt2 = re.fullmatch(rf"(?P<n>.+?)\s+(?P<t>{_TIPO_ALT})", nome, re.I)
+    if not mt:  # 'criar campo "area" decimal': a palavra que sobrou é o tipo
+        mt2 = re.search(rf"(?:^|\s)(?P<t>{_TIPO_ALT})$", resto.strip(), re.I)
         if mt2:
             tipo, rotulo = _tipo(mt2.group("t"))
-            nome = mt2.group("n").strip()
     if not nome:
-        raise ErroComando("Faltou o nome do campo. Ex.: 'criar campo area tipo decimal'.")
-    if re.search(r"\s", nome):
-        nome = re.sub(r"\s+", "_", nome)
+        raise ErroComando(MSG_ASPAS.format('criar campo "area" tipo decimal'))
     params = {"layer_name": camada, "field_name": nome, "field_type": tipo}
     extra = []
     if tam:
@@ -456,33 +513,30 @@ def _criar_campo(m, ctx):
     return _plano(f"Criar o campo '{nome}' ({rotulo}{ex}) na camada '{camada}'", "add_field", params)
 
 
-@comando(rf"{V_APAGAR}\s+{ART}{N_CAMPO}\s+(?P<resto>.+?)", "apagar campo area da camada lotes")
+@comando(rf"{V_APAGAR}\s+{ART}{N_CAMPO}\s+(?P<resto>.+?)", 'apagar campo "obs"')
 def _apagar_campo(m, ctx):
-    resto, camada = _separar_camada(m.group("resto"), ctx)
+    brutos = _exige_aspas(m.group("resto"), 'apagar campo "obs"  ou  apagar campos "obs" e "uso"')
+    _, camada = _separar_camada(_sem_aspas(m.group("resto")).strip(), ctx)
     camada = _ou_ativa(camada, ctx)
-    nomes = [_campo(n, camada, ctx) for n in _lista_nomes(resto)]
-    if not nomes:
-        raise ErroComando("Faltou o nome do campo.")
+    nomes = [_campo(n, camada, ctx) for n in brutos]
     alvo = nomes[0] if len(nomes) == 1 else nomes
     txt = ", ".join(f"'{n}'" for n in nomes)
     return _plano(f"Apagar {'o campo' if len(nomes) == 1 else 'os campos'} {txt} da camada '{camada}'",
                   "delete_field", {"layer_name": camada, "field_name": alvo}, destrutivo=True)
 
 
-@comando(rf"{V_RENOMEAR}\s+(?:d[ao]\s+)?{ART}{N_CAMPO}\s+(?P<resto>.+?)", "renomear campo nm para nome na camada lotes")
+@comando(rf"{V_RENOMEAR}\s+(?:d[ao]\s+)?{ART}{N_CAMPO}\s+(?P<resto>.+?)", 'renomear campo "nm" para "nome"')
 def _renomear_campo(m, ctx):
-    resto, camada = _separar_camada(m.group("resto"), ctx)
+    nomes = _exige_aspas(m.group("resto"), 'renomear campo "nm" para "nome"', minimo=2)
+    _, camada = _separar_camada(_sem_aspas(m.group("resto")).strip(), ctx)
     camada = _ou_ativa(camada, ctx)
-    partes = re.split(r"\s+(?:para|pra|como)\s+", resto, maxsplit=1, flags=re.I)
-    if len(partes) != 2:
-        raise ErroComando("Use: 'renomear campo ANTIGO para NOVO'.")
-    antigo = _campo(partes[0], camada, ctx)
-    novo = re.sub(r"\s+", "_", _limpa(partes[1]))
+    antigo = _campo(nomes[0], camada, ctx)
+    novo = nomes[1].strip()
     return _plano(f"Renomear o campo '{antigo}' para '{novo}' na camada '{camada}'", "rename_field",
                   {"layer_name": camada, "field_name": antigo, "new_name": novo})
 
 
-@comando(rf"{V_LISTAR}\s+{ART}{N_CAMPO}(?P<resto>.*?)", "listar campos de lotes")
+@comando(rf"{V_LISTAR}\s+{ART}{N_CAMPO}(?P<resto>.*?)", "listar campos")
 def _listar_campos(m, ctx):
     resto = m.group("resto").strip()
     camada = _camada(re.sub(rf"^{_PREP}\s+{ART}(?:{_k('camada')}\s+)?", "", resto, flags=re.I), ctx) \
@@ -493,7 +547,7 @@ def _listar_campos(m, ctx):
 _EXPR_SEP = rf"(?:\s*=\s*|\s+(?:com|como|usando|igual a|recebendo|pela expressão|pela expressao|por)\s+)"
 
 
-@comando(rf"{V_CALC}\s+{ART}{N_CAMPO}\s+(?P<resto>.+?)", "calcular campo area com $area / 10000 na camada lotes")
+@comando(rf"{V_CALC}\s+{ART}{N_CAMPO}\s+(?P<resto>.+?)", 'calcular campo "area_ha" com área em hectares')
 def _calcular_campo(m, ctx):
     resto = m.group("resto")
     so_sel = False
@@ -501,9 +555,13 @@ def _calcular_campo(m, ctx):
     if ms:
         so_sel = True
         resto = (resto[:ms.start()] + resto[ms.end():]).strip()
-    partes = re.split(_EXPR_SEP, resto, maxsplit=1, flags=re.I)
+    mn = re.match(r'\s*"([^"]+)"', resto)
+    if not mn:
+        raise ErroComando(MSG_ASPAS.format('calcular campo "area_ha" com área em hectares'))
+    nome_alvo = mn.group(1).strip()
+    partes = re.split(_EXPR_SEP, " " + resto[mn.end():], maxsplit=1, flags=re.I)
     if len(partes) != 2:
-        raise ErroComando("Use: 'calcular campo NOME com EXPRESSÃO' (ex.: com $area / 10000).")
+        raise ErroComando('Use: calcular campo "NOME" com EXPRESSÃO (ex.: com $area / 10000).')
     esquerda, expr = partes
     camada = None
     mc = re.search(rf"\s+{_PREP}\s+{ART}{_k('camada')}\s+(?P<c>.+)$", expr, re.I)
@@ -513,14 +571,15 @@ def _calcular_campo(m, ctx):
             expr = expr[:mc.start()]
         except ErroComando:
             camada = None
-    esquerda, cam2 = _separar_camada(esquerda, ctx)
+    esquerda, cam2 = _separar_camada(esquerda.strip(), ctx)
+    if not cam2 and esquerda.strip():
+        cam2 = _camada_de(esquerda, ctx)
     camada = camada or _ou_ativa(cam2, ctx)
-    nome = _limpa(esquerda)
     campos = ctx.get("campos", {}).get(camada, [])
     try:
-        nome = _campo(nome, camada, ctx)
+        nome = _campo(nome_alvo, camada, ctx)
     except ErroComando:
-        nome = re.sub(r"\s+", "_", nome)  # campo novo: calculate_field cria
+        nome = nome_alvo  # campo novo: calculate_field cria
     expr = _expr_calculo(expr.strip(), campos)
     params = {"layer_name": camada, "field_name": nome, "expression": expr}
     if nome not in campos:
@@ -560,10 +619,6 @@ def _expr_calculo(txt, campos):
         if txt.strip()[0] == '"' and v in campos:
             return txt.strip()
         return "'" + v.replace("'", "''") + "'"
-    try:
-        return '"' + _achar(t, campos, "o campo") + '"'
-    except ErroComando:
-        pass
     if re.search(r'[$@()"+\-*/|]', t) or re.search(r"\b(?:case|when|if|concat|round|to_)\w*", t, re.I):
         return t
     if " " not in t:
@@ -583,7 +638,7 @@ def _tipo_da_expr(expr):
 
 # --- seleção
 @comando(rf"{V_SELEC}\s+(?:{_alt('tudo', 'todas', 'todos', 'todas as feições', 'todos os registros', 'tudo de')})(?:\s+{_PREP})?\s*(?:{ART}{_k('camada')})?\s*(?P<camada>.*?)",
-         "selecionar tudo em lotes")
+         "selecionar tudo")
 def _selecionar_tudo(m, ctx):
     if _onde(m.group("camada"))[1]:
         return None  # 'selecionar todos os lotes onde ...': é seleção por condição
@@ -591,7 +646,7 @@ def _selecionar_tudo(m, ctx):
     return _plano(f"Selecionar todas as feições de '{camada}'", "select_features", {"layer_name": camada})
 
 
-@comando(rf"{V_SELEC}\s+(?P<resto>.+?)", "selecionar lotes onde area maior que 1000")
+@comando(rf"{V_SELEC}\s+(?P<resto>.+?)", 'selecionar onde "bairro" igual a Centro')
 def _selecionar(m, ctx):
     resto = m.group("resto")
     modo = "new"
@@ -617,21 +672,21 @@ def _limpar_selecao(m, ctx):
     return _plano(f"Limpar a seleção de '{camada}'", "clear_selection", {"layer_name": camada})
 
 
-@comando(rf"{_alt('inverter', 'inverta', 'inverte')}\s+{ART}{_k('seleção')}(?P<resto>.*?)", "inverter seleção de lotes")
+@comando(rf"{_alt('inverter', 'inverta', 'inverte')}\s+{ART}{_k('seleção')}(?P<resto>.*?)", "inverter seleção")
 def _inverter(m, ctx):
     camada = _camada_de(m.group("resto"), ctx)
     return _plano(f"Inverter a seleção de '{camada}'", "invert_selection", {"layer_name": camada})
 
 
 @comando(rf"{V_APAGAR}\s+{ART}(?:{N_FEICAO}\s+)?{_alt('selecionadas', 'selecionados', 'seleção', 'a seleção')}(?P<resto>.*?)",
-         "apagar feições selecionadas de lotes")
+         "apagar feições selecionadas")
 def _apagar_selecionadas(m, ctx):
     camada = _camada_de(m.group("resto"), ctx)
     return _plano(f"Apagar as feições selecionadas de '{camada}'", "delete_selected_features",
                   {"layer_name": camada}, destrutivo=True)
 
 
-@comando(rf"{V_APAGAR}\s+{ART}(?:{N_FEICAO})\s+(?P<resto>.+?)", "apagar feições de lotes onde area menor que 1")
+@comando(rf"{V_APAGAR}\s+{ART}(?:{N_FEICAO})\s+(?P<resto>.+?)", 'apagar feições onde "uso" vazio')
 def _apagar_feicoes(m, ctx):
     esquerda, cond = _onde(m.group("resto"))
     if not cond:
@@ -643,7 +698,7 @@ def _apagar_feicoes(m, ctx):
 
 
 @comando(rf"{_alt('contar', 'conte', 'conta', 'quantas', 'quantos', 'total de')}\s+(?:{ART}{N_FEICAO}\s+)?(?:{_alt('tem', 'há', 'existem', 'possui')}\s+)?(?P<resto>.*?)",
-         "contar feições de lotes onde area maior que 1000")
+         'contar feições onde area maior que 1000')
 def _contar(m, ctx):
     esquerda, cond = _onde(m.group("resto"))
     camada = _camada_de(esquerda.strip(), ctx)
@@ -656,7 +711,7 @@ def _contar(m, ctx):
 
 # --- sessão de edição
 @comando(rf"(?:{V_INICIAR}\s+{ART}{N_EDICAO}|{_alt('editar', 'edite', 'edita')})(?:\s+(?P<resto>.*?))?",
-         "editar camada lotes")
+         "editar camada")
 def _iniciar_edicao(m, ctx):
     camada = _camada_de((m.group("resto") or "").strip(), ctx)
     return _plano(f"Ligar a edição da camada '{camada}'", "start_editing", {"layer_name": camada})
@@ -706,14 +761,14 @@ def _status(m, ctx):
 
 # --- filtro e navegação
 @comando(rf"(?:{_alt('limpar', 'limpe', 'tirar', 'tire', 'remover', 'remova', 'desligar', 'desligue', 'apagar', 'apague')})\s+{ART}{_alt('filtro', 'filtros')}(?P<resto>.*?)",
-         "limpar filtro de lotes")
+         "limpar filtro")
 def _limpar_filtro(m, ctx):
     camada = _camada_de(m.group("resto"), ctx)
     return _plano(f"Remover o filtro de '{camada}'", "clear_filter", {"layer_name": camada})
 
 
 @comando(rf"{_alt('filtrar', 'filtre', 'filtra', 'mostrar só', 'mostre só', 'mostrar apenas', 'mostre apenas', 'exibir só', 'exibir apenas')}\s+(?:{ART}{N_FEICAO}\s+)?(?P<resto>.+?)",
-         "filtrar lotes onde bairro igual a Centro")
+         'filtrar onde "bairro" igual a Centro')
 def _filtrar(m, ctx):
     esquerda, cond = _onde(m.group("resto"))
     if not cond:
@@ -737,7 +792,7 @@ def _zoom_selecao(m, ctx):
 
 @comando(rf"(?:{_alt('zoom', 'dar zoom', 'dê zoom', 'aproximar', 'aproxime', 'enquadrar', 'enquadre', 'ir para', 'vá para', 'centralizar', 'centralize')})"
          rf"(?:\s+{_PREP})?\s+{ART}(?:{_k('camada')}\s+)?(?P<camada>.+?)",
-         "zoom na camada lotes")
+         "zoom na camada")
 def _zoom(m, ctx):
     camada = _camada(m.group("camada"), ctx)
     return _plano(f"Aproximar o mapa da camada '{camada}'", "zoom_to_layer", {"layer_name": camada})
@@ -895,19 +950,21 @@ def _por_campo(resto, ctx, graduado):
     else:  # 'cores por bairro em lotes': o 'por' já ficou no verbo
         esquerda, direita = "", resto
     direita = re.sub(rf"^(?:{ART})?(?:{N_CAMPO}\s+)?", "", direita.strip(), flags=re.I)
-    direita, camada = _separar_camada(direita, ctx)
+    entre_aspas = _aspas(direita)
+    direita_sem = _sem_aspas(direita).strip() if entre_aspas else direita
+    direita_sem, camada = _separar_camada(direita_sem, ctx)
     camada = camada or _camada_sobra(esquerda, ctx)
-    alvo = _limpa(direita)
-    try:
-        campo = _campo(alvo, camada, ctx)
-    except ErroComando:
+    if entre_aspas:
+        campo = _campo(entre_aspas[0], camada, ctx)
+    else:
+        alvo = _limpa(direita_sem)
         campo = None
         for pad, geo in _GEOMETRIA:
             if re.fullmatch(pad, alvo, re.I):
                 campo, graduado = geo, True
                 break
         if campo is None:
-            raise
+            raise ErroComando(MSG_ASPAS.format('cores por "bairro"'))
     if graduado:
         params = {"layer_name": camada, "field": campo, "classes": classes, "mode": modo}
         if inicio:
@@ -936,7 +993,7 @@ _K_TRANSP = _alt("transparência", "transparencia", "transparente", "semitranspa
 
 
 # --- simbologia
-@comando(rf"(?:{V_AJUSTAR}\s+)?(?P<resto>.*?{_K_TRANSP}.*?)", "transparência 50% em lotes")
+@comando(rf"(?:{V_AJUSTAR}\s+)?(?P<resto>.*?{_K_TRANSP}.*?)", "transparência 50%")
 def _opacidade(m, ctx):
     t = m.group("resto")
     if re.search(_alt("sem preenchimento", "pintar", "pinte", "rótulo", "rótulos"), t, re.I):
@@ -964,7 +1021,7 @@ def _opacidade(m, ctx):
 @comando(_alt("sem contorno", "tirar o contorno", "tire o contorno", "remover o contorno",
               "remova o contorno", "tirar contorno", "tire contorno", "tirar a borda",
               "tire a borda", "sem borda") + r"(?P<resto>.*?)",
-         "sem contorno em lotes", primeiro=True)
+         "sem contorno", primeiro=True)
 def _sem_contorno(m, ctx):
     camada = _camada_sobra(m.group("resto"), ctx)
     return _plano(f"Tirar o contorno de '{camada}'", "update_symbol",
@@ -972,7 +1029,7 @@ def _sem_contorno(m, ctx):
 
 
 @comando(rf"(?:{V_AJUSTAR}\s+)?(?:{ART})?" + _alt("contorno", "contornos", "borda", "bordas")
-         + r"\s+(?P<resto>.+?)", "contorno preto de 0.5 em lotes")
+         + r"\s+(?P<resto>.+?)", "contorno preto de 0.5")
 def _contorno(m, ctx):
     resto = " " + m.group("resto") + " "
     params = {}
@@ -1000,7 +1057,7 @@ def _contorno(m, ctx):
 @comando(rf"(?:{V_AJUSTAR}\s+)?(?:{ART})?" + _alt("espessura", "largura", "grossura", "tamanho")
          + r"\s+(?:d[aoe]s?\s+(?P<o>" + _alt("linhas", "linha", "pontos", "ponto", "símbolos", "símbolo",
                                            "simbolos", "simbolo", "contorno", "borda", "traço", "traco")
-         + r")\s+)?(?P<resto>.+?)", "espessura 1.5 em vias")
+         + r")\s+)?(?P<resto>.+?)", "espessura 1.5")
 def _tamanho(m, ctx):
     resto = " " + m.group("resto") + " "
     resto, mn = _tirar(r"\s(?:para|pra|em|de|com|=)?\s*(\d+(?:[.,]\d+)?)\s*(?:mm|milímetros?|milimetros?)?(?=\s)", resto)
@@ -1020,14 +1077,14 @@ def _tamanho(m, ctx):
                           "colorir por", "pintar por", "simbologia por", "estilo por", "classificar",
                           "classifique", "classifica", "graduar", "gradue", "degradê", "degrade",
                           "mapa temático", "mapa tematico", "mapa de cores")
-         + r")\s+(?P<resto>.+?)", "cores por bairro em lotes")
+         + r")\s+(?P<resto>.+?)", 'cores por "bairro"')
 def _cores_por(m, ctx):
     v = sem_acento(m.group("v"))
     graduado = v.startswith(("classific", "gradu", "degrad"))
     return _por_campo(m.group("resto"), ctx, graduado)
 
 
-@comando(rf"(?P<v>{V_PINTAR})\s+(?P<resto>.+?)", "pintar lotes de azul")
+@comando(rf"(?P<v>{V_PINTAR})\s+(?P<resto>.+?)", "pintar de azul")
 def _pintar(m, ctx):
     resto = m.group("resto")
     if re.search(_POR, " " + resto + " ", re.I):
@@ -1059,7 +1116,7 @@ V_SUMIR = _alt("desligar", "desligue", "desliga", "desativar", "desative", "esco
                "ocultar", "oculte", "apagar", "apague", "sem")
 
 
-@comando(rf"(?:{V_LIMPAR}|{V_SUMIR})\s+{ART}{N_ROTULO}(?P<resto>.*?)", "tirar rótulos de lotes")
+@comando(rf"(?:{V_LIMPAR}|{V_SUMIR})\s+{ART}{N_ROTULO}(?P<resto>.*?)", "tirar rótulos")
 def _sem_rotulos(m, ctx):
     camada = _camada_sobra(m.group("resto"), ctx)
     return _plano(f"Desligar os rótulos de '{camada}'", "set_labels",
@@ -1071,7 +1128,7 @@ _V_ROTULAR = _alt("ligar", "ligue", "ativar", "ative", "mostrar", "mostre", "exi
 
 @comando(rf"(?:(?:{V_CRIAR}|{V_AJUSTAR}|{_V_ROTULAR})\s+{ART}{N_ROTULO}|"
          + _alt("rotular", "rotule", "rotula", "etiquetar", "etiquete") + rf"|{ART}{N_ROTULO})(?P<resto>.*?)",
-         "rótulos com nome em lotes")
+         'rótulos com "nome"')
 def _rotulos(m, ctx):
     resto = " " + m.group("resto") + " "
     params = {}
@@ -1108,11 +1165,10 @@ def _rotulos(m, ctx):
     bruto = (campo_txt or "").strip()
     if re.search(r"\|\||[()+$]", bruto) or bruto.count('"') > 2:
         campo = bruto  # expressão QGIS: usa como veio
+    elif re.fullmatch(r'"[^"]+"', bruto):
+        campo = _campo(bruto[1:-1], camada, ctx)
     else:
-        campo_txt = _limpa(bruto)
-        if not campo_txt:
-            raise ErroComando("Diga o campo do rótulo. Ex.: 'rótulos com nome em lotes'.")
-        campo = _campo(campo_txt, camada, ctx)
+        raise ErroComando(MSG_ASPAS.format('rótulos com "nome"'))
     params.update(layer_name=camada, field=campo)
     extra = []
     if "size" in params:
@@ -1201,15 +1257,15 @@ def _escala_mapa(m, ctx):
 @comando(r"(?P<v>" + _alt("trazer", "traga", "traz", "subir", "suba", "sobe", "mandar", "mande", "manda",
                           "enviar", "envie", "levar", "leve", "descer", "desça", "desce", "mover", "mova",
                           "move", "colocar", "coloque", "jogar", "jogue")
-         + r")\s+" + ART + "(?:" + _k("camada") + r"\s+)?(?P<camada>.+?)\s+(?P<d>"
+         + r")\s+" + ART + "(?:(?:" + _k("camada") + r"\s+)?(?P<camada>.+?)\s+)?(?P<d>"
          + _alt("para frente", "pra frente", "para a frente", "à frente", "na frente", "para cima",
                 "pra cima", "para o topo", "pro topo", "no topo", "em cima", "por cima", "para trás",
                 "para tras", "pra trás", "pra tras", "para baixo", "pra baixo", "para o fundo",
                 "pro fundo", "no fundo", "atrás", "por baixo", "embaixo", "uma posição acima",
                 "uma posição abaixo", "um nível acima", "um nível abaixo") + ")",
-         "trazer lotes para frente")
+         "trazer para frente")
 def _ordem(m, ctx):
-    camada = _camada(m.group("camada"), ctx)
+    camada = _camada(m.group("camada") or "", ctx)
     d = sem_acento(m.group("d"))
     if "posicao" in d or "nivel" in d:
         pos = "up" if "acima" in d else "down"
@@ -1427,15 +1483,15 @@ def _item_layout(m, ctx):
 @comando(r"(?P<v>" + _alt("esconder", "esconda", "esconde", "ocultar", "oculte", "oculta", "desligar",
                           "desligue", "desliga", "mostrar", "mostre", "mostra", "exibir", "exiba", "exibe",
                           "ligar", "ligue", "liga", "reexibir", "acender", "acenda")
-         + r")\s+(?:" + ART + r")?(?:" + _k("camada") + r"\s+)?(?P<camada>.+?)", "esconder camada lotes")
+         + r")(?:\s+(?:" + ART + r")?(?:" + _k("camada") + r"(?:\s+|$))?(?P<camada>.*?))?", "esconder camada")
 def _visibilidade(m, ctx):
     v = sem_acento(m.group("v"))
     visivel = not v.startswith(("escond", "ocult", "deslig"))
-    alvo = sem_acento(_limpa(m.group("camada")))
+    alvo = sem_acento(_limpa(m.group("camada") or ""))
     if alvo in ("todas", "todas as camadas", "tudo", "todas camadas", "as camadas"):
         return _plano(f"{'Mostrar' if visivel else 'Esconder'} todas as camadas", "set_layer_visibility",
                       {"visible": visivel})
-    camada = _camada(m.group("camada"), ctx)
+    camada = _camada(m.group("camada") or "", ctx)
     return _plano(f"{'Mostrar' if visivel else 'Esconder'} a camada '{camada}'", "set_layer_visibility",
                   {"layer_name": camada, "visible": visivel})
 
@@ -1457,6 +1513,7 @@ def interpretar(texto, ctx=None):
     """
     ctx = ctx or {}
     texto = (texto or "").strip()
+    texto = texto.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
     if not texto:
         return None
     if re.fullmatch(AJUDA + FIM, texto, re.I):

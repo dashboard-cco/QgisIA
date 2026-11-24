@@ -254,7 +254,10 @@ COMO O USUÁRIO COSTUMA FALAR (traduza para as ações acima):
 - "editar camada / ligar edição"  -> start_editing; "salvar edição"  -> commit_edits;
   "cancelar edição"  -> rollback_edits; "desfazer"  -> undo_edit
 - "esta camada / camada ativa / a selecionada"  -> use a CAMADA ATIVA informada no contexto
-- Se o usuário não disser a camada, use a camada ativa.
+- Se o usuário não disser a camada, use a camada ativa. Alterações (estilo, campos, feições)
+  são feitas na CAMADA ATIVA (a selecionada no painel de Camadas); outras camadas só entram
+  como entrada de geoprocessamento (ex.: recortar a ativa por outra).
+- Texto entre aspas duplas ("nome") é NOME DE CAMPO; use-o exatamente. Texto sem aspas é valor.
 - Os nomes de campo do contexto são os únicos que existem: use-os exatamente.
 - Para mudar dados com segurança, prefira: start_editing -> alterações -> (o usuário salva).
   Se a camada já estiver "em edição" no contexto, NÃO chame commit_edits sem o usuário pedir.

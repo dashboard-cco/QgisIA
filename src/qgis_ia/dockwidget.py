@@ -106,6 +106,16 @@ class QgisIaDockWidget(QDockWidget):
         header.addStretch()
         layout.addLayout(header)
 
+        # Regra 1: os comandos valem para a camada selecionada no painel de Camadas
+        self.ativa_label = QLabel()
+        self.ativa_label.setWordWrap(True)
+        layout.addWidget(self.ativa_label)
+        self._atualizar_ativa()
+        try:
+            self.iface.currentLayerChanged.connect(self._atualizar_ativa)
+        except Exception:
+            pass
+
         # Lista de camadas (contexto)
         self.layer_combo = QComboBox()
         self.layer_combo.addItem("Todas as camadas")
@@ -124,7 +134,7 @@ class QgisIaDockWidget(QDockWidget):
         # Input area
         input_layout = QHBoxLayout()
         self.prompt_input = QLineEdit()
-        self.prompt_input.setPlaceholderText("Ex: 'copiar camada lotes', 'criar campo area tipo decimal' ou 'ajuda'")
+        self.prompt_input.setPlaceholderText('Ex: pintar de azul · criar campo "area" tipo decimal · ajuda')
         self.prompt_input.returnPressed.connect(self.send_prompt)
         input_layout.addWidget(self.prompt_input)
 
@@ -229,11 +239,18 @@ class QgisIaDockWidget(QDockWidget):
         return [self.layer_combo.currentText()]
 
     def _camada_ativa(self):
-        """Camada escolhida no combo 'Contexto' ou, se 'Todas', a ativa do QGIS."""
-        if self.layer_combo.currentIndex() > 0:
-            return self.layer_combo.currentText()
+        """Camada selecionada no painel de Camadas do QGIS (os comandos só valem para ela)."""
         layer = self.iface.activeLayer()
         return layer.name() if layer else None
+
+    def _atualizar_ativa(self, *_):
+        nome = self._camada_ativa()
+        if nome:
+            self.ativa_label.setText(f"Camada selecionada: <b>{nome}</b>")
+            self.ativa_label.setStyleSheet("color: #2e7d32;")
+        else:
+            self.ativa_label.setText("Nenhuma camada selecionada: clique em uma no painel de Camadas.")
+            self.ativa_label.setStyleSheet("color: #c62828;")
 
     def _contexto_comandos(self):
         """Nomes de camadas e campos para o interpretador de comandos simples."""
@@ -312,7 +329,10 @@ class QgisIaDockWidget(QDockWidget):
         if plano is not None:
             if plano.get("ajuda") is not None:
                 self.append_chat("📖 Comandos simples (sem IA)",
-                                 "<br>".join(f"• {e}" for e in plano["ajuda"])
+                                 "<b>Regras:</b> o comando vale para a camada selecionada no painel "
+                                 "de Camadas (não precisa dizer o nome). Nome de campo vai entre "
+                                 "aspas: criar campo \"area\".<br>"
+                                 + "<br>".join(f"• {e}" for e in plano["ajuda"])
                                  + "<br>Qualquer outra coisa é enviada para a IA.")
                 return
             self.append_chat("⚡ Comando", plano["descricao"])

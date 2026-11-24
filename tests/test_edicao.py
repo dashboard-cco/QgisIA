@@ -43,10 +43,15 @@ QgsProject.instance().addMapLayer(lotes)
 def ctx():
     camadas = [l.name() for l in QgsProject.instance().mapLayers().values()]
     campos = {l.name(): [f.name() for f in l.fields()] for l in QgsProject.instance().mapLayers().values()}
-    return {"camadas": camadas, "campos": campos, "ativa": "lotes"}
+    return {"camadas": camadas, "campos": campos, "ativa": SEL[0]}
 
 
-def rodar(frase):
+SEL = ["lotes"]  # camada selecionada no painel de camadas
+
+
+def rodar(frase, sel=None):
+    if sel:
+        SEL[0] = sel
     plano = comandos.interpretar(frase, ctx())
     check(plano is not None, f"não reconheceu: {frase}")
     if plano is None:
@@ -62,66 +67,66 @@ def rodar(frase):
 campos = lambda l: [f.name() for f in l.fields()]
 
 # campos
-rodar("criar campo area_ha tipo decimal")
+rodar('criar campo "area_ha" tipo decimal')
 check("area_ha" in campos(lotes), "campo area_ha criado")
-rodar("calcular campo area_ha com área em hectares")
+rodar('calcular campo "area_ha" com área em hectares')
 v = {f["id"]: f["area_ha"] for f in lotes.getFeatures()}
 check(abs(v[3] - 1.0) < 1e-9, f"área do lote 3 = 1 ha ({v[3]})")
-rodar("renomear campo area_ha para hectares")
+rodar('renomear campo "area_ha" para "hectares"')
 check("hectares" in campos(lotes) and "area_ha" not in campos(lotes), "campo renomeado")
-rodar("criar campo obs")
-rodar("apagar campos obs e hectares")
+rodar('criar campo "obs"')
+rodar('apagar campos "obs" e "hectares"')
 check(campos(lotes) == ["id", "bairro", "uso"], f"campos apagados ({campos(lotes)})")
 
 # seleção / contagem
-r = rodar("selecionar lotes onde bairro igual a Centro")
+r = rodar('selecionar onde "bairro" igual a Centro')
 check(lotes.selectedFeatureCount() == 2, "2 lotes no Centro")
 rodar("inverter seleção")
 check(lotes.selectedFeatureCount() == 2, "inverteu")
 rodar("limpar seleção")
 check(lotes.selectedFeatureCount() == 0, "seleção limpa")
-r = rodar("contar feições de lotes onde uso vazio")
+r = rodar('contar feições onde "uso" vazio')
 check(r and r["count"] == 1, f"1 lote sem uso ({r})")
 
 # cópia
-r = rodar("copiar camada lotes como lotes_bkp")
+r = rodar("copiar camada como lotes_bkp")
 bkp = QgsProject.instance().mapLayersByName("lotes_bkp")
 check(bkp and bkp[0].featureCount() == 4, "cópia com 4 feições")
-rodar("selecionar lotes onde uso igual a residencial")
-r = rodar("copiar lotes só as selecionadas")
+rodar('selecionar onde "uso" igual a residencial')
+r = rodar("copiar só as selecionadas")
 sel = QgsProject.instance().mapLayersByName("lotes_copia")
 check(sel and sel[0].featureCount() == 2, "cópia só das selecionadas")
 
 # sessão de edição + desfazer
-rodar("editar camada lotes")
+rodar("editar camada")
 check(lotes.isEditable(), "edição ligada")
 rodar("apagar feições selecionadas")
 check(lotes.featureCount() == 2, f"2 apagadas no buffer ({lotes.featureCount()})")
 rodar("desfazer")
 check(lotes.featureCount() == 4, f"desfez a exclusão ({lotes.featureCount()})")
-rodar("criar campo nivel tipo inteiro")
+rodar('criar campo "nivel" tipo inteiro')
 check("nivel" in campos(lotes), "campo no buffer de edição")
 r = rodar("o que está em edição?")
 check(r and r["editing"] and r["editing"][0]["layer"] == "lotes", f"status de edição ({r})")
 rodar("cancelar edição")
 check(not lotes.isEditable() and "nivel" not in campos(lotes) and lotes.featureCount() == 4,
       "edição descartada")
-rodar("editar lotes")
-rodar("apagar feições de lotes onde area menor que 2")  # sem campo 'area': usa $area (lote 4 tem 1 m²)
+rodar("editar")
+rodar("apagar feições onde area menor que 2")  # sem campo 'area': usa $area (lote 4 tem 1 m²)
 check(lotes.featureCount() == 3, f"apagou o lote de 1 m² ({lotes.featureCount()})")
 rodar("salvar edição")
 check(not lotes.isEditable() and lotes.featureCount() == 3, "edição salva e fechada")
 
 # filtro
-rodar("filtrar lotes onde bairro igual a Sul")
+rodar('filtrar onde "bairro" igual a Sul')
 check(lotes.featureCount() == 1, "filtro aplicado")
-rodar("limpar filtro de lotes")
+rodar("limpar filtro")
 check(lotes.featureCount() >= 3, "filtro removido")
 
 # camadas
-rodar("renomear camada lotes_bkp para lotes_backup")
+rodar("renomear camada para lotes_backup", sel="lotes_bkp")
 check(QgsProject.instance().mapLayersByName("lotes_backup"), "camada renomeada")
-rodar("remover camada lotes_backup")
+rodar("remover camada", sel="lotes_backup")
 check(not QgsProject.instance().mapLayersByName("lotes_backup"), "camada removida")
 
 QgsProject.instance().clear()
