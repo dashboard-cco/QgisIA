@@ -42,6 +42,12 @@ class QgisIaPlugin:
         # Inicializa cliente Claude (lazy - só quando abrir)
         self.claude_client = None
 
+        # Servidor MCP liga junto com o QGIS: o Claude Code / Desktop já encontra o QGIS
+        try:
+            self.get_mcp_server().start()
+        except Exception as e:
+            QgsMessageLog.logMessage(f"MCP não iniciou: {e}", "QGIS_IA")
+
     def unload(self):
         """Remove menu/toolbar ao desativar plugin."""
         self.iface.removePluginMenu("&QGIS_IA", self.action)

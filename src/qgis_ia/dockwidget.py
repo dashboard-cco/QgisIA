@@ -3,12 +3,14 @@
 Dock Widget principal - Interface de chat
 """
 import json
+import os
+import sys
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QVBoxLayout, QWidget, QTextEdit, QLineEdit,
     QPushButton, QHBoxLayout, QLabel, QComboBox, QMessageBox,
     QGroupBox, QCheckBox, QApplication
 )
-from qgis.PyQt.QtCore import Qt, pyqtSignal, QThread, QObject
+from qgis.PyQt.QtCore import Qt, pyqtSignal, QThread, QObject, QTimer
 from qgis.core import QgsProject, QgsMessageLog, QgsVectorLayer, QgsWkbTypes
 
 from .executor import execute_plan, DESTRUTIVAS
@@ -138,19 +140,54 @@ class QgisIaDockWidget(QDockWidget):
         self.prompt_input.returnPressed.connect(self.send_prompt)
         input_layout.addWidget(self.prompt_input)
 
+        self.voz_btn = QPushButton("🎤")
+        self.voz_btn.setToolTip("Comando por voz: abre a digitação por voz do Windows (Win+H).\n"
+                                "Fale o comando; ele é enviado quando você parar de falar.\n"
+                                "Para campos, diga 'aspas': criar campo aspas área aspas.")
+        self.voz_btn.setFixedWidth(36)
+        self.voz_btn.setCheckable(True)
+        self.voz_btn.toggled.connect(self.on_voz)
+        input_layout.addWidget(self.voz_btn)
+
         self.send_btn = QPushButton("Enviar")
         self.send_btn.clicked.connect(self.send_prompt)
         input_layout.addWidget(self.send_btn)
         layout.addLayout(input_layout)
+
+        # Voz: envia quando o texto ditado para de mudar
+        self._voz_timer = QTimer(self)
+        self._voz_timer.setSingleShot(True)
+        self._voz_timer.setInterval(2500)
+        self._voz_timer.timeout.connect(self._voz_enviar)
+        self._voz_limite = QTimer(self)
+        self._voz_limite.setSingleShot(True)
+        self._voz_limite.setInterval(30000)
+        self._voz_limite.timeout.connect(lambda: self.voz_btn.setChecked(False))
+        self.prompt_input.textChanged.connect(self._voz_texto)
 
         # Status
         self.status_label = QLabel("Pronto. Digite um comando acima.")
         self.status_label.setStyleSheet("color: #888; font-size: 11px;")
         layout.addWidget(self.status_label)
 
+        # Conexões: MCP liga sozinho; a IA do chat usa Claude e, se falhar, OpenRouter
+        conn_row = QHBoxLayout()
+        self.conexao_label = QLabel()
+        self.conexao_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.conexao_label.setWordWrap(True)
+        conn_row.addWidget(self.conexao_label, 1)
+        self.avancado_btn = QPushButton("⚙")
+        self.avancado_btn.setToolTip("Mostrar/ocultar opções avançadas do servidor MCP")
+        self.avancado_btn.setFixedWidth(28)
+        self.avancado_btn.setCheckable(True)
+        conn_row.addWidget(self.avancado_btn)
+        layout.addLayout(conn_row)
+
         # Servidor MCP (permite o Claude Desktop / Claude Code controlarem o QGIS)
         if self.mcp_server is not None:
             box = QGroupBox("Servidor MCP (Claude Desktop / Claude Code)")
+            box.setVisible(False)
+            self.avancado_btn.toggled.connect(box.setVisible)
             box_layout = QVBoxLayout(box)
 
             self.mcp_btn = QPushButton("Iniciar servidor")
@@ -182,7 +219,11 @@ class QgisIaDockWidget(QDockWidget):
             box_layout.addWidget(self.mcp_status)
             layout.addWidget(box)
 
+        else:
+            self.avancado_btn.setVisible(False)
+
         self.setWidget(main_widget)
+        self._atualizar_conexao()
 
     # --- Servidor MCP ----------------------------------------------------
     def toggle_mcp(self):
@@ -194,10 +235,78 @@ class QgisIaDockWidget(QDockWidget):
     def on_mcp_status(self, msg):
         self.mcp_status.setText(msg)
         self.mcp_btn.setText("Parar servidor" if self.mcp_server.is_running() else "Iniciar servidor")
+        self._atualizar_conexao()
 
     def on_mcp_log(self, msg):
+        # Vai para o log do QGIS (Exibir > Painéis > Mensagens de log), não polui o chat
         QgsMessageLog.logMessage(msg, "QGIS_IA")
-        self.append_chat("🔌", msg)
+
+    def _atualizar_conexao(self, provedor=None):
+        partes = []
+        if self.mcp_server is not None:
+            if self.mcp_server.is_running():
+                partes.append(f"🟢 Claude Code (MCP) porta {self.mcp_server.port}")
+            else:
+                partes.append("🔴 MCP parado")
+        cli = self.claude_client
+        if provedor:
+            partes.append(f"IA do chat: {provedor}")
+        elif cli is not None:
+            tem_a = getattr(cli, "anthropic_client", None) is not None
+            tem_o = getattr(cli, "openrouter_client", None) is not None
+            if tem_a and tem_o:
+                partes.append("IA do chat: Claude (reserva: OpenRouter)")
+            elif tem_a:
+                partes.append("IA do chat: Claude")
+            elif tem_o:
+                partes.append("IA do chat: OpenRouter")
+            else:
+                partes.append("IA do chat: sem chave")
+        self.conexao_label.setText(" · ".join(partes))
+
+    # --- Voz ---------------------------------------------------------------
+    def on_voz(self, ligado):
+        if not ligado:
+            self._voz_timer.stop()
+            self._voz_limite.stop()
+            self.voz_btn.setStyleSheet("")
+            if self.status_label.text().startswith("🎤"):
+                self.status_label.setText("Pronto.")
+            return
+        if os.name != "nt":
+            QMessageBox.information(self, "QGIS_IA", "Comando por voz usa a digitação por voz do Windows.")
+            self.voz_btn.setChecked(False)
+            return
+        self.voz_btn.setStyleSheet("background: #c62828; color: white;")
+        self.prompt_input.clear()
+        self.prompt_input.setFocus()
+        self.status_label.setText("🎤 Fale o comando… (envia quando você parar de falar)")
+        self._voz_limite.start()
+        QTimer.singleShot(200, self._abrir_ditado)
+
+    def _abrir_ditado(self):
+        """Win+H: digitação por voz do Windows, escrevendo na caixa de comando."""
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            VK_LWIN, VK_H, UP = 0x5B, 0x48, 0x0002
+            u.keybd_event(VK_LWIN, 0, 0, 0)
+            u.keybd_event(VK_H, 0, 0, 0)
+            u.keybd_event(VK_H, 0, UP, 0)
+            u.keybd_event(VK_LWIN, 0, UP, 0)
+        except Exception as e:
+            self.append_chat("⚠️", f"Não consegui abrir a digitação por voz do Windows: {e}")
+            self.voz_btn.setChecked(False)
+
+    def _voz_texto(self, texto):
+        if self.voz_btn.isChecked() and texto.strip():
+            self._voz_timer.start()  # reinicia a contagem a cada palavra nova
+            self._voz_limite.start()
+
+    def _voz_enviar(self):
+        if self.voz_btn.isChecked() and self.prompt_input.text().strip():
+            self.voz_btn.setChecked(False)
+            self.send_prompt()
 
     def on_allow_code(self, checked):
         if checked:
@@ -363,15 +472,17 @@ class QgisIaDockWidget(QDockWidget):
 
         for warning in getattr(self.claude_client, "last_warnings", []):
             self.append_chat("⚠️", warning)
+        provedor = getattr(self.claude_client, "last_provider", None) or "IA"
+        self._atualizar_conexao(provedor)
 
         explanation = plan.get("explanation")
         if explanation:
-            self.append_chat("🤖 Claude", explanation)
+            self.append_chat(f"🤖 {provedor}", explanation)
         if not plan.get("steps"):
             self.status_label.setText("Nada a executar.")
             return
 
-        self.append_chat("🤖 Claude", f"Plano: {json.dumps(plan, ensure_ascii=False, indent=2)}")
+        self.append_chat(f"🤖 {provedor}", f"Plano:{json.dumps(plan, ensure_ascii=False, indent=2)}")
         if not self._confirmar(plan):
             self.append_chat("↩️", "Cancelado.")
             self.status_label.setText("Cancelado.")

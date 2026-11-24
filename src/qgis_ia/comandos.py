@@ -1514,6 +1514,9 @@ def interpretar(texto, ctx=None):
     ctx = ctx or {}
     texto = (texto or "").strip()
     texto = texto.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    # Ditado por voz: "criar campo aspas área aspas" -> criar campo "área"
+    texto = re.sub(r"\b(?:abre\s+|abrir\s+)?aspas\s+(.+?)\s+(?:fecha\s+|fechar\s+)?aspas\b",
+                   lambda m: '"' + m.group(1).strip(" .,") + '"', texto, flags=re.I)
     if not texto:
         return None
     if re.fullmatch(AJUDA + FIM, texto, re.I):

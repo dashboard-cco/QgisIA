@@ -327,11 +327,14 @@ Solicitação do usuário: {prompt}
 Retorne APENAS o JSON do plano."""
 
         self.last_warnings = []
+        self.last_provider = None
 
         # 1. Tenta Anthropic
         if self.anthropic_client:
             try:
-                return self._ask_anthropic(full_prompt)
+                plano = self._ask_anthropic(full_prompt)
+                self.last_provider = "Claude"
+                return plano
             except Exception as e:
                 self.last_warnings.append(
                     f"Anthropic falhou ({type(e).__name__}: {e}).")
@@ -342,7 +345,9 @@ Retorne APENAS o JSON do plano."""
                 self.last_warnings.append(
                     "Enviando para a OpenRouter (modelo gratuito de terceiro).")
             try:
-                return self._ask_openrouter(full_prompt)
+                plano = self._ask_openrouter(full_prompt)
+                self.last_provider = "OpenRouter"
+                return plano
             except Exception as e:
                 self.last_warnings.append(
                     f"OpenRouter falhou ({type(e).__name__}: {e}).")

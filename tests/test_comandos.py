@@ -158,6 +158,14 @@ caso("limpar filtro", "clear_filter", layer_name="lotes")
 caso("zoom na camada", "zoom_to_layer", layer_name="lotes")
 caso("zoom na seleção", "zoom_to_selection")
 
+# --- ditado por voz (Windows Win+H): "aspas" falado vira aspas; ponto final é ignorado
+caso("Criar campo aspas área aspas tipo decimal.", "add_field", field_name="área", field_type="Double")
+caso("apagar campo aspas bairro aspas", "delete_field", field_name="bairro")
+caso("renomear campo aspas uso aspas para aspas uso_solo aspas", "rename_field", field_name="uso",
+     new_name="uso_solo")
+caso("Selecionar onde abre aspas bairro fecha aspas igual a Centro.", "select_features",
+     expression="\"bairro\" = 'Centro'")
+
 # --- cortesia
 caso('por favor, apagar campo "uso"', "delete_field", field_name="uso")
 
