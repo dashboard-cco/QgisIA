@@ -40,6 +40,9 @@ FERRAMENTAS = {
     "polygons_to_lines": ("native:polygonstolines", "linhas", False),
     "lines_to_polygons": ("native:linestopolygons", "poligonos", False),
     "grid": ("native:creategrid", "grade", True),
+    "split_length": ("native:splitlinesbylength", "trechos", True),
+    "split_lines": ("native:splitwithlines", "dividido", False),
+    "snap": ("native:snapgeometries", "encaixado", False),
 }
 
 PREDICADOS = {"intersects": 0, "contains": 1, "disjoint": 2, "equals": 3, "touches": 4,
@@ -96,7 +99,9 @@ def geoprocess(tool, layer_name, overlay=None, overlays=None, distance=None, fie
     tool: buffer, dissolve, clip, intersection, difference, union, merge, reproject,
     centroids, convex_hull, convex_hull_all, simplify, spatial_join, nearest_join,
     count_points, fix_geometries, single_parts, delete_duplicates, extract_vertices,
-    polygons_to_lines, lines_to_polygons, grid.
+    polygons_to_lines, lines_to_polygons, grid, split_length (trechos de 'distance' m),
+    split_lines (quebra nos cruzamentos; overlay opcional), snap (encaixa na camada
+    'overlay' com tolerância 'distance' m, padrão 5).
     Distâncias (buffer, simplify, grid) em metros: a camada precisa estar em CRS projetado.
     """
     if tool not in FERRAMENTAS:
@@ -108,7 +113,7 @@ def geoprocess(tool, layer_name, overlay=None, overlays=None, distance=None, fie
     entrada = _fonte(camada, only_selected)
     outra = None
     if tool in ("clip", "intersection", "difference", "union", "spatial_join", "nearest_join",
-                "count_points"):
+                "count_points", "snap"):
         if not overlay:
             raise ValueError("Diga a outra camada (ex.: recortar pela camada Regiões).")
         outra = _layer(overlay)
@@ -170,6 +175,22 @@ def geoprocess(tool, layer_name, overlay=None, overlays=None, distance=None, fie
              "HSPACING": float(distance), "VSPACING": float(distance),
              "HOVERLAY": 0, "VOVERLAY": 0, "CRS": camada.crs()}
         sufixo = f"grade_{float(distance):g}m"
+    elif tool == "split_length":
+        if distance is None:
+            raise ValueError("Diga o tamanho dos trechos (ex.: dividir linhas a cada 100 m).")
+        if camada.geometryType() != QgsWkbTypes.LineGeometry:
+            raise ValueError("Dividir em trechos vale para camada de linhas.")
+        p["LENGTH"] = float(distance)
+        sufixo = f"trechos_{float(distance):g}m"
+    elif tool == "split_lines":
+        if camada.geometryType() != QgsWkbTypes.LineGeometry:
+            raise ValueError("Dividir nos cruzamentos vale para camada de linhas.")
+        p["LINES"] = _layer(overlay) if overlay else camada
+    elif tool == "snap":
+        if distance is not None:
+            _exige_metros(camada, "tolerância")
+        p.update(REFERENCE_LAYER=outra, TOLERANCE=float(distance) if distance is not None else 5.0,
+                 BEHAVIOR=1)
 
     nome = _nome_livre(output_name or f"{camada.name()}_{sufixo}")
     p["OUTPUT"] = "memory:" + nome
@@ -245,29 +266,41 @@ FORMATOS = {
     "geojson": ("GeoJSON", "geojson"), "json": ("GeoJSON", "geojson"),
     "csv": ("CSV", "csv"), "kml": ("KML", "kml"), "dxf": ("DXF", "dxf"),
     "xlsx": ("XLSX", "xlsx"), "excel": ("XLSX", "xlsx"),
+    "gdb": ("OpenFileGDB", "gdb"), "geodatabase": ("OpenFileGDB", "gdb"),
 }
 
 
 def save_layer_as(layer_name, output_path=None, format=None, only_selected=False):
-    """Grava a camada em arquivo (gpkg, shp, geojson, csv, kml, dxf, xlsx).
+    """Grava a camada em arquivo (gpkg, shp, geojson, csv, kml, dxf, xlsx, gdb).
 
     Sem caminho: pasta do projeto, com o nome da camada. Formato pela extensão ou por 'format'.
+    gdb: grava num File Geodatabase; se o .gdb já existir, entra como mais uma camada.
     """
     camada = _layer(layer_name)
-    ext = os.path.splitext(output_path or "")[1].lower().lstrip(".")
+    ext = os.path.splitext((output_path or "").rstrip("\\/"))[1].lower().lstrip(".")
     chave = (format or ext or "gpkg").lower()
     if chave not in FORMATOS:
         raise ValueError(f"Formato desconhecido: {chave}. Use: {', '.join(sorted(FORMATOS))}")
     driver, extensao = FORMATOS[chave]
     from .mapas import _caminho
-    caminho = _caminho(output_path, camada.name(), extensao)
-    if os.path.exists(caminho):
-        raise ValueError(f"Já existe o arquivo {caminho}. Escolha outro nome (… em C:\\pasta\\novo.{extensao}).")
+    if output_path and output_path.rstrip("\\/").lower().endswith(".gdb"):
+        caminho = output_path.rstrip("\\/")  # o próprio .gdb (é uma pasta)
+    else:
+        caminho = _caminho(output_path, camada.name(), extensao)
     opcoes = QgsVectorFileWriter.SaveVectorOptions()
+    if driver == "OpenFileGDB" and os.path.isdir(caminho):
+        # .gdb já existe: acrescenta a camada como mais uma feature class
+        from qgis.core import QgsProviderRegistry
+        tabelas = {d.name().lower() for d in QgsProviderRegistry.instance().querySublayers(caminho)}
+        if camada.name().lower() in tabelas:
+            raise ValueError(f"O {os.path.basename(caminho)} já tem a camada '{camada.name()}'.")
+        opcoes.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+    elif os.path.exists(caminho):
+        raise ValueError(f"Já existe o arquivo {caminho}. Escolha outro nome (… em C:\\pasta\\novo.{extensao}).")
     opcoes.driverName = driver
     opcoes.fileEncoding = "UTF-8"
     opcoes.onlySelectedFeatures = bool(only_selected)
-    if driver == "GPKG":
+    if driver in ("GPKG", "OpenFileGDB"):
         opcoes.layerName = camada.name()
     erro = QgsVectorFileWriter.writeAsVectorFormatV3(
         camada, caminho, QgsProject.instance().transformContext(), opcoes)

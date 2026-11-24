@@ -373,7 +373,9 @@ TOOLS = {
         "tool: buffer, dissolve, clip, intersection, difference, union, merge, reproject, "
         "centroids, convex_hull, convex_hull_all, simplify, spatial_join, nearest_join, "
         "count_points, fix_geometries, single_parts, delete_duplicates, extract_vertices, "
-        "polygons_to_lines, lines_to_polygons, grid. Distâncias em metros (CRS projetado).",
+        "polygons_to_lines, lines_to_polygons, grid, split_length (trechos de distance m), "
+        "split_lines (quebra nos cruzamentos), snap (encaixa em overlay, tolerância distance m). "
+        "Distâncias em metros (CRS projetado).",
         _obj({"tool": _S, "layer_name": _LAYER,
               "overlay": _s("Segunda camada (recorte, interseção, junção, contagem...)"),
               "overlays": {"type": "array", "items": _S, "description": "Camadas para merge"},
@@ -394,7 +396,8 @@ TOOLS = {
         "Área total (polígonos) ou comprimento total (linhas), elipsoidal.",
         _obj({"layer_name": _LAYER, "only_selected": _B}, ["layer_name"])),
     "save_layer_as": (
-        "Grava a camada em arquivo: gpkg, shp, geojson, csv, kml, dxf, xlsx. Sem caminho: "
+        "Grava a camada em arquivo: gpkg, shp, geojson, csv, kml, dxf, xlsx, gdb (num .gdb que já "
+        "existe entra como mais uma camada). Sem caminho: "
         "pasta do projeto. [grava arquivo]",
         _obj({"layer_name": _LAYER, "output_path": _S, "format": _S, "only_selected": _B},
              ["layer_name"])),
@@ -430,9 +433,143 @@ TOOLS = {
         "DEFINE o sistema de coordenadas da camada sem mexer nas coordenadas (corrigir etiqueta "
         "errada). Para converter coordenadas use geoprocess reproject.",
         _obj({"layer_name": _LAYER, "crs": _S}, ["layer_name", "crs"])),
+    "fill_field_by_location": (
+        "Preenche um campo que JÁ EXISTE na camada com o valor do polígono de outra camada onde "
+        "cada feição está (ex.: codigo_ra pelos limites das RAs). [altera dados]",
+        _obj({"layer_name": _LAYER, "field": _S, "overlay": _s("Camada de polígonos"),
+              "overlay_field": _s("Campo de onde vem o valor (padrão: mesmo nome)"), "only_empty": _B},
+             ["layer_name", "field", "overlay"])),
     "copy_style": (
         "Copia o estilo inteiro (cores, classes, rótulos) de uma camada para outra.",
         _obj({"from_layer": _S, "to_layer": _LAYER}, ["from_layer", "to_layer"])),
+
+    "duplicar_camada_com_ra": (
+        "Copia uma camada vetorial para uma nova camada temporária e cria nela a coluna 'RA' "
+        "(Região Administrativa). Preenche a RA por localização se 'ra_layer' (polígonos das "
+        "RAs) for informado; senão pelo campo codigo_ra, se existir; senão deixa vazia. "
+        "A camada original não é alterada.",
+        _obj({"layer_name": _LAYER,
+              "output_name": _s("Nome da cópia (padrão: <camada>_RA)"),
+              "ra_layer": _s("Camada de polígonos das RAs, para preencher por localização"),
+              "ra_name_field": _s("Campo com o nome da RA em ra_layer (padrão: 1º campo texto)")},
+             ["layer_name"])),
+
+        # ------------------------------------- Planos de Serviço SLU-DF (Anexo G)
+    "slu_info_edital": (
+        "Regras do Anexo G do edital SLU-DF (Pregão 90005/2026): serviços P1-P12, siglas "
+        "(CC, CS, VA, VE, MA, ME, VL, LE, FR, PE, TR), camadas, campos, códigos de circuito, "
+        "RAs por lote, Tabela 4 de equipamentos. Consulte antes de montar um plano.",
+        _obj({"servico": _s("Opcional: P1..P12 ou sigla, para detalhar um serviço")})),
+    "slu_criar_gdb": (
+        "Cria o File Geodatabase vazio do Plano de Serviço no padrão do Anexo G (ex.: CC01.gdb): "
+        "camadas com nomes padronizados, campos, apelidos, domínios e SIRGAS 2000/UTM 23S. Para "
+        "serviços sob demanda, com 'limite_df' já grava 1 polígono por turno. [grava arquivo]",
+        _obj({"servico": _s("P1..P12 ou sigla (CC, CS, VA, VE, MA...)"),
+              "lote": {"type": "integer", "enum": [1, 2, 3]},
+              "pasta_saida": _s("Pasta onde o .gdb será criado"),
+              "sobrescrever": _B, "carregar": _B,
+              "limite_df": _s("Sob demanda: arquivo vetorial com o limite do DF (opcional)"),
+              "turnos": {"type": "array", "items": {"type": "string",
+                                                    "enum": ["Diurno", "Noturno"]}},
+              "numero_equipes": _I},
+             ["servico", "lote", "pasta_saida"])),
+    "slu_validar_gdb": (
+        "Confere um .gdb contra o Anexo G: camadas/campos/CRS, lote, Código Circuito, Código "
+        "RA (e RAs do lote), Nome do Circuito, frequência x dias, ciclo/semana, horários, "
+        "tipos, endereçamento e regras topológicas (single part, 50-130/200 m, overlap, "
+        "intersect, linhas/pontos dentro do polígono, ponto sobre linha, 1 início e 1 fim). "
+        "Serviço e lote saem do nome do arquivo. 'relatorio_xlsx' grava o relatório completo. "
+        "[relatorio_xlsx grava arquivo]",
+        _obj({"gdb_path": _S, "servico": _S, "lote": _I,
+              "topologia_linhas": {"type": "boolean",
+                                   "description": "Confere overlap/intersect entre linhas "
+                                                  "(padrão true; mais lento)"},
+              "relatorio_xlsx": _s("Caminho do relatório .xlsx (opcional)"),
+              "carregar_erros": {"type": "boolean",
+                                 "description": "Adiciona camada de pontos com os problemas"}},
+             ["gdb_path"])),
+    "slu_preencher_atributos": (
+        "Preenche no .gdb os campos que o Anexo G define por regra: lote, frequência e Nome do "
+        "Circuito (dos dias/ciclo/RA), tipo de serviço (do código), ciclo/semana padrão, "
+        "Código RA de linhas e pontos (do polígono), turno, extensão da sarjeta. Faz backup "
+        "do .gdb antes. [altera dados]",
+        _obj({"gdb_path": _S, "servico": _S, "lote": _I,
+              "sobrescrever": {"type": "boolean",
+                               "description": "true recalcula também campos já preenchidos"},
+              "backup": _B}, ["gdb_path"])),
+    "slu_exportar_xlsx": (
+        "Gera a TABELA .xlsx do plano (item 3.1.2) com as tabelas de atributos do .gdb: uma "
+        "aba por camada, cabeçalhos do Anexo G, horários HH:MM:SS. [grava arquivo]",
+        _obj({"gdb_path": _S, "saida_xlsx": _S}, ["gdb_path", "saida_xlsx"])),
+    "slu_gerar_programacao_trimestral": (
+        "Gera a programação trimestral .xlsx dos serviços sob demanda (P3, P4, P7-P12; seção 7, "
+        "Tabela 5): todos os dias do trimestre agrupados por semana. [grava arquivo]",
+        _obj({"servico": _S, "lote": _I, "ano": _I,
+              "trimestre": {"type": "integer", "enum": [1, 2, 3, 4]}, "saida_xlsx": _S},
+             ["servico", "lote", "ano", "trimestre", "saida_xlsx"])),
+    "slu_gerar_docx": (
+        "Gera o TEXTO .docx do Plano de Serviço (item 3.1.1) em Arial 12/14 com as seções "
+        "exigidas; 'dados' preenche seções ({título: texto}); com 'gdb_path' inclui o quadro "
+        "de circuitos. [grava arquivo]",
+        _obj({"servico": _S, "lote": _I, "saida_docx": _S, "empresa": _S,
+              "dados": {"type": "object", "description":
+                        "Títulos: O que é o serviço; Tipo de material coletado; Local de origem "
+                        "e destinação final do material; Planejamento das rotas e frequências; "
+                        "Veículos utilizados e placas; Tipos de caminhões utilizados; Pessoal da "
+                        "operação; Horários; Procedimentos operacionais; Equipe e contatos-chave"},
+              "gdb_path": _S}, ["servico", "lote", "saida_docx"])),
+    "slu_exportar_shapefile": (
+        "Exporta o .gdb para shapefile (o edital, item 7.8, pede mapas em .shp). Nomes de campo "
+        "são cortados em 10 caracteres; o retorno traz o mapa de nomes. [grava arquivo]",
+        _obj({"gdb_path": _S, "pasta_saida": _S}, ["gdb_path", "pasta_saida"])),
+    "slu_gerar_plano": (
+        "Gera de uma vez os arquivos do Plano de Serviço (item 3.1): .gdb (novo ou "
+        "'gdb_existente'), .xlsx (atributos e/ou programação trimestral) e .docx, numa pasta "
+        "<servico>_<lote>. [grava arquivo]",
+        _obj({"servico": _S, "lote": _I, "pasta_saida": _S, "ano": _I, "trimestre": _I,
+              "gdb_existente": _s("Usar este .gdb já preenchido em vez de criar um vazio"),
+              "empresa": _S, "dados_texto": {"type": "object"},
+              "limite_df": _S, "turnos": {"type": "array", "items": _S},
+              "numero_equipes": _I, "carregar": _B},
+             ["servico", "lote", "pasta_saida"])),
+
+    "slu_redesenhar_coleta": (
+        "Redesenha um plano de coleta existente (CC0X/CS0X .gdb) sobre a rede viária, no padrão "
+        "do Anexo G e com os lotes do novo edital: traduz as linhas atuais para a rede, tira o "
+        "que ficou em outro lote, calcula as vias de passagem pela rede (respeitando a mão), "
+        "corta em 50-130 m, refaz polígonos, início/fim, Código RA, nome e endereçamento. "
+        "Grava um .gdb NOVO (o atual não muda), um GeoPackage de pendências e a validação. "
+        "Demora alguns minutos. [grava arquivo]",
+        _obj({"gdb_atual": _s("Plano atual, ex.: E:/.../Gdb/CC01.gdb"),
+              "rede_gdb": _s("Rede viária, ex.: E:/.../Vias/RedeNetworkAnalyst.gdb"),
+              "rede_camada": _s("Camada de linhas da rede (padrão ArquivoRua)"),
+              "sentidos": _s("GeoPackage com ID e o campo de sentido (ArquivoRua.gpkg)"),
+              "campo_sentido": _s("Campo com FT/TF para mão única (padrão sentido_proposto)"),
+              "respeitar_sentido": _B,
+              "vias_endereco": _s("Shapefile de vias com o campo Endereco"),
+              "regioes": _s("Shapefile das RAs com ra_cira e Lote"),
+              "pasta_saida": _S,
+              "circuitos": {"type": "array", "items": _I,
+                            "description": "Só estes códigos (para teste)"},
+              "buffer_poligono": _N, "restaurar_shx": _B, "sobrescrever": _B, "carregar": _B,
+              "ajustar_frota": {"type": "boolean", "description":
+                                "Junta circuitos (mesmos dias/horário/RA, vizinhos) até cada "
+                                "dia e turno caber na frota do Anexo R"},
+              "distancia_fusao": _s("Distância máxima entre circuitos para juntar, em m "
+                                    "(padrão 1500)")},
+             ["gdb_atual", "rede_gdb", "regioes", "pasta_saida"])),
+
+    "slu_planilha_soltura": (
+        "Gera a planilha de soltura (.xlsx) de um plano de coleta: veículo, placa, horário e "
+        "circuito por dia e turno. Dimensiona a frota pelos circuitos (cada circuito com "
+        "veículo fixo, sem sobreposição de horário; códigos VA01, VA02...). Abas Soltura, "
+        "Frota (placas a preencher), Grade semanal, Resumo e Circuitos. [grava arquivo]",
+        _obj({"gdb_path": _S, "saida_xlsx": _S,
+              "intervalo_min": _s("Folga mínima entre circuitos do mesmo veículo (padrão 60)"),
+              "dois_turnos": {"type": "boolean",
+                              "description": "Veículo pode fazer diurno e noturno (padrão true)"},
+              "prefixo_veiculo": _s("Prefixo dos códigos de veículo (padrão VA)")},
+             ["gdb_path", "saida_xlsx"])),
 
     # ----------------------------------------------------------- avançado
     "execute_code": (

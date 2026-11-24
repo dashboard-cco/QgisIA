@@ -1844,7 +1844,8 @@ def _valores(m, ctx):
 
 
 # --- gravar camada em arquivo
-_FMT_CAMADA = _alt("gpkg", "geopackage", "shp", "shapefile", "geojson", "json", "csv", "kml", "dxf", "xlsx", "excel")
+_FMT_CAMADA = _alt("gpkg", "geopackage", "shp", "shapefile", "geojson", "json", "csv", "kml", "dxf", "xlsx",
+                   "excel", "gdb", "file geodatabase", "geodatabase")
 
 
 @comando(r"(?:" + _alt("exportar", "exporte", "exporta", "salvar", "salve", "salva", "gravar", "grave", "grava")
@@ -1867,7 +1868,8 @@ def _salvar_camada(m, ctx):
     mf = re.search(r"(?:^|\s)(?:em\s+|para\s+|como\s+|no\s+formato\s+|formato\s+)?(?P<f>" + _FMT_CAMADA + r")(?=\s|$)", resto, re.I)
     if mf:
         f = sem_acento(mf.group("f"))
-        params["format"] = {"geopackage": "gpkg", "shapefile": "shp", "json": "geojson", "excel": "xlsx"}.get(f, f)
+        params["format"] = {"geopackage": "gpkg", "shapefile": "shp", "json": "geojson", "excel": "xlsx",
+                            "geodatabase": "gdb", "file geodatabase": "gdb"}.get(f, f)
         resto = resto[:mf.start()] + " " + resto[mf.end():]
     sobra = re.sub(rf"(?:{ART})?{_k('camada')}|\b(?:em|para|como|no|na|a|o|de|da)\b", " ", resto, flags=re.I).strip()
     if sobra:
@@ -2075,6 +2077,398 @@ def _info_camada(m, ctx):
                        "sistema do projeto", "qual o sistema do projeto") + r")\??", "padrão do projeto", primeiro=True)
 def _padrao_projeto(m, ctx):
     return _plano("Ver como o projeto guarda os dados (pasta, formato e sistema)", "project_storage_info", {})
+
+
+# ============================================ linhas: dividir / encaixar; preencher pelo lugar
+
+@comando(r"(?:" + _alt("dividir", "divida", "divide", "quebrar", "quebre", "quebra", "segmentar", "segmente",
+                       "picotar", "picote", "cortar", "corte", "corta") + r")\s+(?:" + ART + r")?(?:"
+         + _alt("linhas", "linha", "vias", "ruas", "trechos") + r")?\s*(?:" + _alt("a cada", "em trechos de",
+                                                                                   "em pedaços de", "de", "em")
+         + r")\s+(?P<d>\d+(?:[.,]\d+)?\s*(?:quil[oô]metros?|metros?|km|m)?)(?P<resto>.*?)",
+         "dividir linhas a cada 100 m", primeiro=True)
+def _dividir_linhas(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto") or "")
+    _sem_camada_propria(resto, ctx)
+    d = _dist(m.group("d"))
+    return _geo(f"Dividir as linhas em trechos de {d:g} m", "split_length", ctx, extra, distance=d)
+
+
+@comando(r"(?:" + _alt("dividir", "divida", "divide", "quebrar", "quebre", "quebra", "cortar", "corte", "corta",
+                       "segmentar", "segmente") + r")\s+(?:" + ART + r")?(?:" + _alt("linhas", "linha", "vias", "ruas")
+         + r"\s+)?(?:" + _alt("nos cruzamentos", "nas interseções", "nas intersecções", "nas intersecoes",
+                              "nos encontros", "nos nós", "nos nos", "onde se cruzam", "nas esquinas")
+         + r")(?P<resto>.*?)", "dividir linhas nos cruzamentos", primeiro=True)
+def _dividir_cruzamentos(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto") or "")
+    mo = re.search(r"\s(?:com|de|da|pela)\s+(?:camada\s+)?(?P<o>.+)$", " " + resto, re.I)
+    outra = _outra(mo.group("o"), ctx) if mo else None
+    if not mo:
+        _sem_camada_propria(resto, ctx)
+    return _geo("Dividir as linhas nos cruzamentos" + (f" com '{outra}'" if outra else ""), "split_lines",
+                ctx, extra, overlay=outra)
+
+
+@comando(r"(?:" + _alt("encaixar", "encaixe", "encaixa", "grudar", "grude", "gruda", "snap", "snapar",
+                       "aderir", "colar os pontos", "cole os pontos") + r")\s+(?P<resto>.+?)",
+         "encaixar nas linhas de vias", primeiro=True)
+def _encaixar(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto"))
+    tol = None
+    resto, mt = _tirar(r"\s(?:com\s+)?(?:" + _alt("tolerância", "tolerancia", "até", "ate", "distância de", "raio de")
+                       + r")\s+(?:de\s+)?(?P<t>\d+(?:[.,]\d+)?\s*(?:metros?|km|m)?)(?=\s|$)", " " + resto + " ")
+    if mt:
+        tol = _dist(mt.group("t"))
+    mo = re.search(r"(?:^|\s)(?:" + _alt("nas linhas de", "na linha de", "nos pontos de", "nos vértices de",
+                                         "na camada", "nas", "na", "nos", "no", "em", "sobre", "às", "as", "a")
+                   + r")\s+(?P<o>.+)$", " ".join(resto.split()), re.I)
+    if not mo:
+        raise ErroComando("Diga em qual camada encaixar. Ex.: encaixar nas linhas de Vias (tolerância 5 m).")
+    outra = _outra(mo.group("o"), ctx)
+    return _geo(f"Encaixar na camada '{outra}' (tolerância {tol if tol is not None else 5:g} m)", "snap",
+                ctx, extra, overlay=outra, distance=tol)
+
+
+@comando(r"(?:" + _alt("preencher", "preencha", "preenche", "completar", "complete", "calcular", "calcule",
+                       "atualizar", "atualize") + r")\s+(?:" + ART + r")?(?:" + N_CAMPO + r"\s+)?(?P<campo>\"[^\"]+\"|\S+)\s+(?:"
+         + _alt("pela camada", "pela localização na camada", "pela localizacao na camada", "com a camada",
+                "a partir da camada", "usando a camada", "conforme a camada", "pelo polígono de",
+                "pelos polígonos de", "pela localização em", "pelo lugar em") + r")\s+(?P<resto>.+?)",
+         'preencher "codigo_ra" pela camada Limites', primeiro=True)
+def _preencher_local(m, ctx):
+    campo = _exige_aspas(m.group("campo"), 'preencher "codigo_ra" pela camada Limites dos Lotes')[0]
+    camada = _ativa(ctx)
+    _campo(campo, camada, ctx)
+    resto = m.group("resto")
+    origem = None
+    mo = re.search(r"\s+(?:(?:" + _alt("do campo", "campo", "pelo campo", "usando o campo", "coluna") + r")\s+)"
+                   + r"(?P<c>\"[^\"]+\")\s*$", resto, re.I)
+    if mo:
+        origem = _aspas(mo.group("c"))[0]
+        resto = resto[:mo.start()]
+    outra = _outra(resto, ctx)
+    if origem:
+        _campo(origem, outra, dict(ctx, ativa=outra))
+    params = {"layer_name": camada, "field": campo, "overlay": outra}
+    if origem:
+        params["overlay_field"] = origem
+    de = f" (campo '{origem}')" if origem else ""
+    return _plano(f"Preencher '{campo}' de '{camada}' com o valor do polígono de '{outra}'{de} onde cada "
+                  "feição está", "fill_field_by_location", params)
+
+
+# ======================================================== Planos de Serviço SLU-DF (Anexo G)
+# O QgisIA é o assistente: tudo por mensagem. O .gdb do plano é o da camada
+# selecionada (regra 1) ou um caminho dito na frase.
+try:
+    from . import edital_slu as _E
+except ImportError:  # testes fora do pacote
+    import edital_slu as _E
+
+_SERV_NOMES = [
+    (_alt("coleta manual de entulho", "coleta manual de entulhos", "entulho manual", "entulhos manual"), "P3"),
+    (_alt("coleta mecanizada de entulho", "coleta mecanizada de entulhos", "entulho mecanizado",
+          "entulho mecanizada"), "P4"),
+    (_alt("coleta convencional", "convencional", "coleta comum", "lixo comum", "coleta domiciliar"), "P1"),
+    (_alt("coleta seletiva", "seletiva", "recicláveis", "reciclaveis"), "P2"),
+    (_alt("varrição manual", "varricao manual", "varrição a mão"), "P5"),
+    (_alt("varrição mecanizada", "varricao mecanizada", "varredeira", "varrição mecânica"), "P6"),
+    (_alt("lavagem de vias", "lavagem de logradouros", "lavagem"), "P7"),
+    (_alt("limpeza de equipamentos", "equipamentos públicos", "equipamentos publicos", "bens públicos"), "P8"),
+    (_alt("catação", "catacao", "áreas verdes", "areas verdes"), "P9"),
+    (_alt("pintura de meio-fio", "pintura de meio fio", "pintura mecanizada", "meio-fio", "meio fio",
+          "frisagem", "pintura"), "P10"),
+    (_alt("pré eventos", "pré-eventos", "pós eventos", "pós-eventos", "eventos", "caixa de gordura"), "P11"),
+    (_alt("transbordos", "transbordo"), "P12"),
+]
+_ROMANO = {"i": 1, "ii": 2, "iii": 3}
+_RE_GDB = r"(?P<g>[A-Za-z]:[\\/][^\"]*?\.gdb|\\\\[^\"]*?\.gdb)(?=[\\/]?(?:\s|$|\"))"
+_RE_PASTA = r"(?:^|\s)(?:em|para|pra|na pasta|na)\s+\"?(?P<p>[A-Za-z]:[\\/][^\"]*?|\\\\[^\"]*?)\"?\s*$"
+
+
+def _servico_lote(txt):
+    """(serviço 'P1'.., lote 1-3) ditos na frase; None no que faltar."""
+    s = lote = None
+    mc = re.search(r"\b(CC|CS|MA|ME|VA|VE|VL|LE|FR|PE|TR)\s?0?([123])\b", txt or "", re.I)
+    if mc:
+        s, lote = _E.SIGLA_PARA_SERVICO[mc.group(1).upper()], int(mc.group(2))
+    mp = re.search(r"\bP\s?(1[0-2]|[1-9])\b", txt or "", re.I)
+    if mp:
+        s = f"P{int(mp.group(1))}"
+    if not s:
+        for pad, cod in _SERV_NOMES:
+            if re.search(r"(?:^|\s)" + pad + r"(?=\s|$|,)", txt or "", re.I):
+                s = cod
+                break
+    ml = re.search(r"\blote\s+(0?[123]|iii|ii|i)\b", txt or "", re.I)
+    if ml:
+        v = ml.group(1).lower()
+        lote = _ROMANO.get(v) or int(v)
+    return s, lote
+
+
+def _gdb_frase(txt):
+    m = re.search(_RE_GDB, txt or "", re.I)
+    return m.group("g").rstrip("\\/") if m else None
+
+
+def _gdb_ativa(ctx):
+    fonte = ctx.get("fonte_ativa") or ""
+    m = re.search(r"^(.*?\.gdb)(?:[\\/|]|$)", fonte, re.I)
+    return os.path.normpath(m.group(1)) if m else None
+
+
+def _gdb(txt, ctx, exemplo="validar plano"):
+    g = _gdb_frase(txt) or _gdb_ativa(ctx)
+    g = os.path.normpath(g) if g else g
+    if not g:
+        raise ErroComando("Selecione no painel uma camada do .gdb do plano (ex.: uma camada do CC01.gdb) "
+                          f"ou diga o caminho: {exemplo} C:\\planos\\CC01.gdb")
+    return g
+
+
+def _servico_do_gdb(gdb):
+    base = os.path.splitext(os.path.basename(gdb))[0].upper()
+    m = re.match(r"^([A-Z]{2})0?([123])", base)
+    if m and m.group(1) in _E.SIGLA_PARA_SERVICO:
+        return _E.SIGLA_PARA_SERVICO[m.group(1)], int(m.group(2))
+    return None, None
+
+
+def _pasta(txt, ctx, gdb=None):
+    sem_gdb = re.sub(_RE_GDB, " ", txt or "", flags=re.I)
+    m = re.search(_RE_PASTA, sem_gdb, re.I)
+    if m:
+        return os.path.normpath(m.group("p").strip().rstrip("\\/"))
+    if gdb:
+        return os.path.dirname(os.path.normpath(gdb))
+    if ctx.get("pasta_projeto"):
+        return os.path.normpath(ctx["pasta_projeto"])
+    raise ErroComando("Diga a pasta (o projeto ainda não foi salvo). Ex.: ... em C:\\planos")
+
+
+def _exige_servico_lote(txt, ctx, exemplo, gdb=None):
+    s, lote = _servico_lote(txt)
+    if gdb and (not s or not lote):
+        gs, gl = _servico_do_gdb(gdb)
+        s, lote = s or gs, lote or gl
+    if not s:
+        raise ErroComando(f"Diga o serviço (P1 a P12, ex.: coleta convencional, varrição manual). Ex.: {exemplo}")
+    if not lote:
+        raise ErroComando(f"Diga o lote (1, 2 ou 3). Ex.: {exemplo}")
+    return s, lote
+
+
+def _nome_serv(s):
+    return f"{s} {_E.SERVICOS[s]['nome']}"
+
+
+_V_GERAR = _alt("gerar", "gere", "gera", "criar", "crie", "cria", "fazer", "faça", "faz", "montar", "monte",
+                "monta", "preparar", "prepare", "elaborar", "elabore")
+
+
+@comando(r"(?:" + _V_GERAR + r")\s+(?:" + ART + r")?(?:" + _alt("gdb", "geodatabase", "file geodatabase",
+                                                                 "arquivo gdb", "arquivo .gdb", ".gdb")
+         + r")(?P<resto>.*?)", "criar gdb da coleta convencional lote 1", primeiro=True)
+def _slu_criar_gdb(m, ctx):
+    resto = m.group("resto") or ""
+    s, lote = _exige_servico_lote(resto, ctx, "criar gdb da coleta convencional lote 1")
+    if _E.SERVICOS[s]["grupo"] == "sem_gdb":
+        raise ErroComando(f"{_nome_serv(s)} não tem .gdb (item 3.2 do Anexo G). Use: gerar plano {s} lote {lote}")
+    pasta = _pasta(resto, ctx)
+    cod = _E.lote_codigo(s, lote)
+    return _plano(f"Criar {cod}.gdb ({_nome_serv(s)}, lote {lote}) em {pasta}, com as camadas, campos e "
+                  "domínios do Anexo G em SIRGAS 2000 / UTM 23S", "slu_criar_gdb",
+                  {"servico": s, "lote": lote, "pasta_saida": pasta})
+
+
+_TRIM = {"primeiro": 1, "1": 1, "segundo": 2, "2": 2, "terceiro": 3, "3": 3, "quarto": 4, "4": 4}
+
+
+def _trimestre(txt):
+    m = re.search(r"\b(primeiro|segundo|terceiro|quarto|[1-4])\s*[ºo°]?\s*(?:" + _k("trimestre") + r")"
+                  r"|\bT([1-4])\b", txt or "", re.I)
+    t = None
+    if m:
+        t = _TRIM[sem_acento(m.group(1))] if m.group(1) else int(m.group(2))
+    ma = re.search(r"\b(20\d\d)\b", txt or "")
+    return t, (int(ma.group(1)) if ma else None)
+
+
+def _empresa(txt):
+    m = re.search(r"\s(?:da\s+)?empresa\s+(?P<e>.+?)(?=\s+(?:em|para|na pasta)\s+[A-Za-z]:|$)", " " + (txt or ""), re.I)
+    return _limpa(m.group("e")) if m else None
+
+
+@comando(r"(?:" + _V_GERAR + r")\s+(?:" + ART + r")?" + _alt("plano de serviço", "plano de servico", "plano completo",
+                                                             "plano") + r"(?P<resto>.*?)",
+         "gerar plano da coleta convencional lote 1", primeiro=True)
+def _slu_gerar_plano(m, ctx):
+    resto = m.group("resto") or ""
+    s, lote = _servico_lote(resto)
+    gdb = _gdb_frase(resto) or (None if s else _gdb_ativa(ctx))
+    s, lote = _exige_servico_lote(resto, ctx, "gerar plano da coleta convencional lote 1", gdb)
+    params = {"servico": s, "lote": lote, "pasta_saida": _pasta(resto, ctx, gdb)}
+    if gdb:
+        params["gdb_existente"] = gdb
+    t, ano = _trimestre(resto)
+    if t:
+        params["trimestre"] = t
+    if ano:
+        params["ano"] = ano
+    emp = _empresa(resto)
+    if emp:
+        params["empresa"] = emp
+    usa = f" usando {os.path.basename(gdb)}" if gdb else ""
+    return _plano(f"Gerar o Plano de Serviço {_nome_serv(s)}, lote {lote}{usa}: .gdb, .xlsx e .docx em "
+                  f"{params['pasta_saida']}", "slu_gerar_plano", params)
+
+
+@comando(r"(?:" + _alt("validar", "valide", "valida", "verificar", "verifique", "verifica", "conferir", "confira",
+                       "confere", "checar", "cheque", "checa", "revisar", "revise", "revisa", "testar", "teste")
+         + r")\s+(?:" + ART + r")?(?:" + _alt("plano", "gdb", "geodatabase", "topologia", "topologia do plano",
+                                             "plano de serviço", "regras do anexo g", "arquivo do plano")
+         + r")(?P<resto>.*?)", "validar plano", primeiro=True)
+def _slu_validar(m, ctx):
+    resto = m.group("resto") or ""
+    gdb = _gdb(resto, ctx)
+    params = {"gdb_path": gdb, "carregar_erros": True}
+    if re.search(_alt("relatório", "relatorio", "planilha", "excel", "xlsx"), resto, re.I):
+        base = os.path.splitext(os.path.basename(gdb))[0]
+        params["relatorio_xlsx"] = os.path.join(_pasta(resto, ctx, gdb), f"{base}_relatorio.xlsx")
+    rel = " e gravar o relatório" if "relatorio_xlsx" in params else ""
+    return _plano(f"Conferir {os.path.basename(gdb)} pelas regras do Anexo G (campos, domínios, códigos, "
+                  f"topologia); os erros entram no mapa como camada{rel}", "slu_validar_gdb", params)
+
+
+@comando(r"(?:" + _alt("preencher", "preencha", "preenche", "completar", "complete", "completa", "calcular",
+                       "calcule", "calcula") + r")\s+(?:" + ART + r")?(?:(?:" + _alt("atributos", "campos", "tabela",
+                                                                                   "dados") + r")\s+(?:" + _alt("do", "no") + r")\s+)?"
+         + _alt("plano", "gdb") + r"(?P<resto>.*?)", "preencher atributos do plano", primeiro=True)
+def _slu_preencher(m, ctx):
+    resto = m.group("resto") or ""
+    sobre = bool(re.search(_alt("sobrescrever", "sobrescrevendo", "substituir", "substituindo", "refazer tudo",
+                                "de novo tudo", "tudo de novo", "todos os campos"), resto, re.I))
+    resto = re.sub(_alt("sobrescrever", "sobrescrevendo", "substituir", "substituindo", "refazer tudo",
+                        "de novo tudo", "tudo de novo", "todos os campos"), " ", resto, flags=re.I)
+    gdb = _gdb(resto, ctx, "preencher atributos do plano")
+    oque = "todos os campos calculáveis" if sobre else "os campos calculáveis vazios"
+    return _plano(f"Preencher {oque} de {os.path.basename(gdb)} (nome do circuito, frequência, tipo de serviço, "
+                  "código RA, turno, extensão de sarjeta...). Faz cópia de segurança antes.",
+                  "slu_preencher_atributos", {"gdb_path": gdb, "sobrescrever": sobre})
+
+
+@comando(r"(?:" + _alt("exportar", "exporte", "exporta", "gerar", "gere", "gera", "salvar", "salve", "salva", "criar",
+                       "crie") + r")\s+(?:" + ART + r")?(?:" + _alt("tabela", "planilha", "tabela de atributos",
+                                                                   "xlsx", "excel") + r")\s+(?:" + _alt("do", "dos") + r")\s+"
+         + _alt("plano", "gdb", "circuitos") + r"(?P<resto>.*?)", "exportar tabela do plano", primeiro=True)
+def _slu_xlsx(m, ctx):
+    resto = re.sub(r"\s(?:em|para)\s+(?:excel|xlsx)\b", " ", m.group("resto") or "", flags=re.I)
+    gdb = _gdb(resto, ctx, "exportar tabela do plano")
+    base = os.path.splitext(os.path.basename(gdb))[0]
+    saida = os.path.join(_pasta(resto, ctx, gdb), f"{base}_tabela_atributos.xlsx")
+    return _plano(f"Exportar a tabela de atributos de {os.path.basename(gdb)} para {saida}", "slu_exportar_xlsx",
+                  {"gdb_path": gdb, "saida_xlsx": saida})
+
+
+@comando(r"(?:(?:" + _V_GERAR + r")\s+)?(?:" + ART + r")?" + _alt("programação trimestral", "programacao trimestral",
+                                                                   "programação", "programacao")
+         + r"(?P<resto>.*?)", "gerar programação trimestral da pintura de meio-fio lote 1 do 2º trimestre de 2026",
+         primeiro=True)
+def _slu_trimestral(m, ctx):
+    resto = m.group("resto") or ""
+    ex = "gerar programação trimestral P10 lote 1 do 2º trimestre de 2026"
+    s, lote = _exige_servico_lote(resto, ctx, ex, _gdb_ativa(ctx) if not _servico_lote(resto)[0] else None)
+    if s not in _E.SERVICOS_TRIMESTRAIS:
+        raise ErroComando(f"{_nome_serv(s)} não tem programação trimestral (só os serviços sob demanda: "
+                          "P3, P4, P7, P8, P9, P10, P11 e P12).")
+    t, ano = _trimestre(resto)
+    if not t:
+        raise ErroComando(f"Diga o trimestre. Ex.: {ex}")
+    import datetime as _dt
+    ano = ano or _dt.date.today().year
+    rot = _E.lote_codigo(s, lote) if _E.SERVICOS[s]["sigla"] else f"{s}_Lote{lote:02d}"
+    saida = os.path.join(_pasta(resto, ctx), f"{rot}_programacao_{ano}_T{t}.xlsx")
+    return _plano(f"Gerar a programação trimestral de {_nome_serv(s)}, lote {lote}, {t}º trimestre de {ano} "
+                  f"({saida})", "slu_gerar_programacao_trimestral",
+                  {"servico": s, "lote": lote, "ano": ano, "trimestre": t, "saida_xlsx": saida})
+
+
+@comando(r"(?:" + _V_GERAR + "|" + _alt("escrever", "escreva", "redigir", "redija") + r")\s+(?:" + ART + r")?(?:"
+         + _alt("texto do plano", "documento do plano", "docx", "word", "texto descritivo", "descrição operacional",
+                "descricao operacional", "memorial do plano") + r")(?P<resto>.*?)", "gerar texto do plano", primeiro=True)
+def _slu_docx(m, ctx):
+    resto = m.group("resto") or ""
+    s, lote = _servico_lote(resto)
+    gdb = _gdb_frase(resto) or (None if s else _gdb_ativa(ctx))
+    s, lote = _exige_servico_lote(resto, ctx, "gerar texto do plano da coleta convencional lote 1", gdb)
+    rot = _E.lote_codigo(s, lote) if _E.SERVICOS[s]["sigla"] else f"Lote{lote:02d}"
+    saida = os.path.join(_pasta(resto, ctx, gdb), f"{s}_{rot}_plano_de_servico.docx")
+    params = {"servico": s, "lote": lote, "saida_docx": saida}
+    if gdb:
+        params["gdb_path"] = gdb
+    emp = _empresa(resto)
+    if emp:
+        params["empresa"] = emp
+    return _plano(f"Gerar o texto (.docx) do Plano de Serviço {_nome_serv(s)}, lote {lote} ({saida})",
+                  "slu_gerar_docx", params)
+
+
+@comando(r"(?:" + _alt("exportar", "exporte", "exporta", "salvar", "salve", "converter", "converta") + r")\s+(?:"
+         + ART + r")?" + _alt("plano", "gdb") + r"\s+(?:em|para|como)\s+(?:" + _alt("shp", "shapefile", "shapefiles")
+         + r")(?P<resto>.*?)", "exportar plano em shapefile", primeiro=True)
+def _slu_shp(m, ctx):
+    resto = m.group("resto") or ""
+    gdb = _gdb(resto, ctx, "exportar plano em shapefile")
+    pasta = _pasta(resto, ctx, gdb)
+    return _plano(f"Exportar as camadas de {os.path.basename(gdb)} em shapefile (pasta {pasta}); atenção: o "
+                  "shapefile corta nomes de campo em 10 letras", "slu_exportar_shapefile",
+                  {"gdb_path": gdb, "pasta_saida": pasta})
+
+
+@comando(r"(?:" + _alt("regras do edital", "regras do anexo g", "o que o edital pede", "o que pede o edital",
+                       "exigências do edital", "exigencias do edital", "edital", "anexo g", "regras")
+         + r")(?:\s+(?:" + _alt("para", "pra", "do", "da", "de", "sobre") + r"))?(?P<resto>.*?)\??",
+         "regras do edital para P1", primeiro=True)
+def _slu_info(m, ctx):
+    resto = m.group("resto") or ""
+    s, _ = _servico_lote(resto)
+    if resto.strip() and not s:
+        return None
+    return _plano("Regras do Anexo G" + (f" para {_nome_serv(s)}" if s else ""), "slu_info_edital",
+                  {"servico": s} if s else {})
+
+
+@comando(r"(?:(?:" + _V_GERAR + r")\s+)?(?:" + ART + r")?" + _alt("planilha de soltura", "soltura", "escala de soltura",
+                                                                   "soltura da frota", "soltura dos veículos")
+         + r"(?P<resto>.*?)", "gerar planilha de soltura", primeiro=True)
+def _slu_soltura(m, ctx):
+    resto = m.group("resto") or ""
+    um = bool(re.search(_alt("um turno", "1 turno", "só um turno", "sem dois turnos", "turno único"), resto, re.I))
+    resto = re.sub(_alt("com um turno", "um turno", "1 turno", "só um turno", "sem dois turnos", "turno único"), " ",
+                   resto, flags=re.I)
+    gdb = _gdb(resto, ctx, "gerar planilha de soltura")
+    base = os.path.splitext(os.path.basename(gdb))[0]
+    saida = os.path.join(_pasta(resto, ctx, gdb), f"{base}_soltura.xlsx")
+    return _plano(f"Gerar a planilha de soltura de {os.path.basename(gdb)} (veículo por circuito, dia e turno, "
+                  f"frota do Anexo R) em {saida}", "slu_planilha_soltura",
+                  {"gdb_path": gdb, "saida_xlsx": saida, "dois_turnos": not um})
+
+
+@comando(r"(?:(?:" + V_COPIAR + r")\s+(?:" + ART + r")?(?:" + _k("camada") + r"\s+)?" + _alt("com", "com a", "com o")
+         + r"\s+(?:" + _alt("coluna", "campo") + r"\s+)?(?:\"RA\"|RA|" + _k("região administrativa") + r"))(?P<resto>.*?)",
+         "copiar camada com RA pela camada Regiões", primeiro=True)
+def _slu_ra(m, ctx):
+    resto = " " + (m.group("resto") or "") + " "
+    params = {"layer_name": _ativa(ctx)}
+    mo = re.search(r"\s(?:pela|com a|usando a|da)\s+(?:camada\s+)?(?P<o>.+?)\s*$", resto, re.I)
+    if mo:
+        params["ra_layer"] = _outra(mo.group("o"), ctx)
+    elif resto.strip():
+        raise ErroComando("Ex.: copiar camada com RA pela camada Regiões (ou sem camada: usa o campo codigo_ra).")
+    de = f" pela localização em '{params['ra_layer']}'" if "ra_layer" in params else " (pelo campo codigo_ra, se houver)"
+    return _plano(f"Copiar '{params['layer_name']}' numa camada nova com a coluna RA preenchida{de}",
+                  "duplicar_camada_com_ra", params)
 
 
 # --- visibilidade (por último: 'mostrar X' é bem genérico)

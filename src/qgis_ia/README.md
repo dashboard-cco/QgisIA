@@ -56,7 +56,7 @@ o servidor, o arquivo é apagado e o token deixa de valer.
 - As ações rodam no thread principal do QGIS. Operações pesadas deixam a interface
   parada enquanto executam.
 
-## As ferramentas (91)
+## As ferramentas (104)
 
 **Inspeção** — `ping`, `get_project_info`, `get_layer_info`, `get_features`,
 `get_field_statistics`, `get_unique_values`, `get_raster_stats`, `get_algorithm_help`,
@@ -99,7 +99,11 @@ satélite/híbrido), `move_layer`, `zoom_full`, `set_scale`, `export_map_image`
 | Exportar | `exportar layout em pdf` · `exportar layout Mapa em png com 150 dpi para C:\saida` · `salvar mapa em pdf` (cria o layout se não houver) · `salvar imagem do mapa` |
 
 **Camadas** — `save_layer_to_project`, `project_storage_info`, `create_layer`, `load_files`,
-`create_group`, `move_layer_to_group`, `set_layer_crs`, `copy_style`
+`create_group`, `move_layer_to_group`, `set_layer_crs`, `copy_style`, `fill_field_by_location`
+
+**Planos SLU-DF** — `slu_info_edital`, `slu_criar_gdb`, `slu_validar_gdb`, `slu_preencher_atributos`,
+`slu_exportar_xlsx`, `slu_gerar_programacao_trimestral`, `slu_gerar_docx`, `slu_exportar_shapefile`,
+`slu_gerar_plano`, `slu_redesenhar_coleta`, `slu_planilha_soltura`, `duplicar_camada_com_ra`
 
 ### Comandos simples de camadas (valem para a camada selecionada)
 
@@ -111,6 +115,21 @@ satélite/híbrido), `move_layer`, `zoom_full`, `set_scale`, `export_map_image`
 | Organizar | `criar grupo Coleta` · `mover para o grupo Coleta` |
 | Sistema | `definir sistema 31983` (só corrige a etiqueta) · `reprojetar para 31983` (converte as coordenadas) |
 | Estilo e info | `copiar estilo de Regiões` · `informações da camada` · `qual o sistema da camada?` · `padrão do projeto` |
+
+### Planos de Serviço SLU-DF (Anexo G do edital) por mensagem
+
+O QgisIA é o assistente: tudo por frase. O App_Qgis é a aplicação com janela.
+O `.gdb` do plano é o da camada selecionada no painel (ou um caminho dito na frase).
+
+| Assunto | Exemplos |
+|---|---|
+| Criar o .gdb modelo | `criar gdb da coleta convencional lote 1` · `criar gdb CC02` · `criar gdb da varrição manual lote 3 em C:\planos` |
+| Plano completo | `gerar plano` (usa o .gdb selecionado) · `gerar plano da coleta seletiva lote 2` · `gerar plano P10 lote 1 do 2º trimestre de 2026 empresa X` |
+| Conferir | `validar plano` (erros entram no mapa) · `validar plano com relatório` |
+| Atributos | `preencher atributos do plano` · `... sobrescrevendo` · `preencher "codigo_ra" pela camada Limites dos Lotes campo "Código_RA"` |
+| Linhas | `dividir linhas a cada 100 m` · `dividir linhas nos cruzamentos` · `encaixar nas linhas de vias com tolerância de 2 m` · `explodir multipartes` |
+| Arquivos | `exportar tabela do plano` · `gerar texto do plano` · `gerar programação trimestral da pintura de meio-fio lote 1 do 2º trimestre de 2026` · `exportar plano em shapefile` · `gerar planilha de soltura` · `exportar camada para C:\planos\CC01.gdb` |
+| Consulta | `regras do edital para P5` · `copiar camada com RA pela camada Regiões` |
 
 **Avançado** — `execute_code` (desligada por padrão)
 

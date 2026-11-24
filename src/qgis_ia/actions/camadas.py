@@ -22,7 +22,6 @@ from qgis.PyQt.QtCore import QMetaType
 # driver OGR -> (chave, extensão)
 DRIVERS = {"GPKG": ("gpkg", "gpkg"), "ESRI Shapefile": ("shp", "shp"), "GeoJSON": ("geojson", "geojson"),
            "KML": ("kml", "kml"), "CSV": ("csv", "csv"), "OpenFileGDB": ("gdb", "gdb"), "FileGDB": ("gdb", "gdb")}
-GRAVAVEIS = {"gpkg": "GPKG", "shp": "ESRI Shapefile", "geojson": "GeoJSON"}
 EXT_DRIVER = {".gpkg": "GPKG", ".shp": "ESRI Shapefile", ".geojson": "GeoJSON", ".json": "GeoJSON",
               ".kml": "KML", ".csv": "CSV", ".gdb": "OpenFileGDB"}
 EXT_VETOR = (".shp", ".gpkg", ".geojson", ".json", ".kml", ".kmz", ".gml", ".dxf", ".tab", ".mif", ".csv")
@@ -81,13 +80,13 @@ def padrao_projeto():
     """
     arquivos = [(c, a) for c in _proj().mapLayers().values() for a in [_arquivo(c)] if a]
     home = _proj().homePath()
-    formatos = Counter(a[2] for _, a in arquivos if a[2] in ("GPKG", "ESRI Shapefile", "GeoJSON"))
+    formatos = Counter(a[2] for _, a in arquivos if a[2] in ("GPKG", "OpenFileGDB", "ESRI Shapefile", "GeoJSON"))
     driver = formatos.most_common(1)[0][0] if formatos else "GPKG"
     do_formato = [(c, a) for c, a in arquivos if a[2] == driver]
     pastas = Counter(os.path.dirname(a[0]) for _, a in do_formato)
     pasta = pastas.most_common(1)[0][0] if pastas else (home if home and os.path.isdir(home) else "")
     gpkg = None
-    if driver == "GPKG":
+    if driver in ("GPKG", "OpenFileGDB"):
         gpkgs = Counter(a[0] for _, a in do_formato)
         gpkg = gpkgs.most_common(1)[0][0] if gpkgs else None
     crss = Counter(c.crs().authid() for c, _ in arquivos if c.crs().isValid())
@@ -115,8 +114,8 @@ def _gravar(camada, nome, padrao, crs=None):
     if destino.isValid() and camada.crs().isValid() and destino != camada.crs() and camada.isSpatial():
         opcoes.ct = QgsCoordinateTransform(camada.crs(), destino, _proj().transformContext())
     base = _nome_arquivo(nome)
-    if driver == "GPKG":
-        caminho = padrao["geopackage"] or os.path.join(padrao["pasta"], "dados.gpkg")
+    if driver in ("GPKG", "OpenFileGDB"):
+        caminho = padrao["geopackage"] or os.path.join(padrao["pasta"], "dados." + DRIVERS[driver][1])
         existentes = {t.lower() for t in _tabelas_gpkg(caminho)}
         tabela, n = base, 2
         while tabela.lower() in existentes:
@@ -189,8 +188,69 @@ def save_layer_to_project(layer_name, output_name=None, keep_temporary=False):
         _proj().addMapLayer(nova)
         acao = "cópia adicionada ao projeto"
     return {"success": True, "output_layer": nova.name(), "output_path": caminho,
-            "formato": padrao["formato"].upper() + (f" (tabela {usado})" if padrao["driver"] == "GPKG" else ""),
+            "formato": padrao["formato"].upper() + (f" (tabela {usado})" if padrao["driver"] in ("GPKG", "OpenFileGDB") else ""),
             "sistema": nova.crs().authid(), "aviso": None, "acao": acao}
+
+
+def fill_field_by_location(layer_name, field, overlay, overlay_field=None, only_empty=False):
+    """Preenche um campo que já existe na camada com o valor do polígono de 'overlay' onde
+    cada feição está (ex.: "codigo_ra" pela camada de limites das RAs).
+
+    overlay_field: campo de onde vem o valor; sem informar, usa o campo de mesmo nome.
+    Se a camada estiver em edição, as mudanças ficam pendentes até salvar a edição.
+    """
+    from qgis.core import QgsSpatialIndex
+    camada, ref = _vetor(layer_name), _vetor(overlay)
+    if camada.fields().indexOf(field) < 0:
+        raise ValueError(f"'{layer_name}' não tem o campo '{field}'. Crie antes: criar campo \"{field}\".")
+    if ref.geometryType() != QgsWkbTypes.PolygonGeometry:
+        raise ValueError(f"'{overlay}' precisa ser uma camada de polígonos.")
+    if not overlay_field:
+        nomes = {f.name().lower(): f.name() for f in ref.fields()}
+        overlay_field = nomes.get(field.lower())
+        if not overlay_field:
+            raise ValueError(f"'{overlay}' não tem campo '{field}'. Diga qual usar: ... campo \"nome\". "
+                             f"Campos: {', '.join(ref.fields().names())}")
+    elif ref.fields().indexOf(overlay_field) < 0:
+        raise ValueError(f"'{overlay}' não tem o campo '{overlay_field}'.")
+    idx = camada.fields().indexOf(field)
+    polis = {f.id(): f for f in ref.getFeatures()}
+    indice = QgsSpatialIndex(ref.getFeatures())
+    xf = QgsCoordinateTransform(camada.crs(), ref.crs(), _proj().transformContext())
+    mudancas, sem = {}, 0
+    for f in camada.getFeatures():
+        if only_empty and f[field] not in (None, "") and str(f[field]) != "NULL":
+            continue
+        g = f.geometry()
+        if g is None or g.isEmpty():
+            sem += 1
+            continue
+        p = g.pointOnSurface()
+        if camada.crs() != ref.crs():
+            p.transform(xf)
+        valor = None
+        for fid in indice.intersects(p.boundingBox()):
+            if polis[fid].geometry().contains(p):
+                valor = polis[fid][overlay_field]
+                break
+        if valor is None:
+            sem += 1
+            continue
+        mudancas[f.id()] = valor
+    ja_editando = camada.isEditable()
+    if not ja_editando and not camada.startEditing():
+        raise RuntimeError(f"Não foi possível editar '{layer_name}'.")
+    try:
+        for fid, v in mudancas.items():
+            camada.changeAttributeValue(fid, idx, v)
+        if not ja_editando and not camada.commitChanges():
+            raise RuntimeError("; ".join(camada.commitErrors()))
+    except Exception:
+        if not ja_editando:
+            camada.rollBack()
+        raise
+    return {"success": True, "layer": layer_name, "campo": field, "updated": len(mudancas),
+            "sem_correspondencia": sem, "pending": ja_editando}
 
 
 def project_storage_info():
@@ -369,4 +429,5 @@ TOOLS = {
     "move_layer_to_group": move_layer_to_group,
     "set_layer_crs": set_layer_crs,
     "copy_style": copy_style,
+    "fill_field_by_location": fill_field_by_location,
 }

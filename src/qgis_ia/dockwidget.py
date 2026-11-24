@@ -45,6 +45,37 @@ def _resumo(result):
     if "comprimento_m" in r:
         return (f"Comprimento total de '{r['layer']}' ({r['feicoes']} feições): "
                 f"{n(r['comprimento_m'])} m = {n(r['comprimento_km'], 3)} km")
+    # --- Planos de Serviço SLU-DF
+    if "aprovado_sem_erros" in r:
+        regras = ", ".join(f"{k.split(':', 1)[1]} ({v})" for k, v in list(r.get("por_regra", {}).items())[:5])
+        txt = (f"Conferência de {os.path.basename(str(r.get('gdb')))}: {r.get('circuitos')} circuitos · "
+               f"{r.get('erros')} erro(s) · {r.get('avisos')} aviso(s)")
+        txt += " — sem erros ✔" if r["aprovado_sem_erros"] else f" — principais: {regras}"
+        if r.get("camada_erros"):
+            txt += f" · erros no mapa: camada '{r['camada_erros']}'"
+        if r.get("relatorio_xlsx"):
+            txt += f" · relatório: {r['relatorio_xlsx']}"
+        return txt
+    if "feicoes_alteradas" in r:
+        alt = ", ".join(f"{k}: {v}" for k, v in r["feicoes_alteradas"].items()) or "nada a preencher"
+        pend = len(r.get("pendencias") or [])
+        return (f"Atributos preenchidos ({alt}) · cópia de segurança: {r.get('backup')}"
+                + (f" · {pend} pendência(s) para preencher à mão" if pend else "")
+                + " · confira com 'validar plano'")
+    if "arquivos" in r and "pasta" in r:
+        arqs = " · ".join(f"{k}: {os.path.basename(v)}" for k, v in r["arquivos"].items())
+        falta = r.get("secoes_docx_a_preencher") or []
+        return (f"Plano gerado em {r['pasta']} — {arqs}"
+                + (f" · seções do texto para completar: {len(falta)}" if falta else ""))
+    if "frota_total" in r:
+        pico = r.get("pico") or {}
+        return (f"Soltura: {r.get('circuitos')} circuitos · frota {r.get('frota_total')} veículos "
+                f"({r.get('frota_usada')}) · pico {pico.get('veiculos')} em {pico.get('dia_turno')} · "
+                f"{len(r.get('circuitos_sem_veiculo') or [])} circuito(s) sem veículo · arquivo: {r.get('xlsx')}")
+    for chave, rot in (("gdb", "Criado"), ("xlsx", "Planilha"), ("docx", "Texto")):
+        if isinstance(r.get(chave), str) and len(r) <= 6:
+            extra = f" · seções para completar: {len(r['secoes_a_preencher'])}" if r.get("secoes_a_preencher") else ""
+            return f"{rot}: {r[chave]}{extra}"
     if "geometry_type" in r and "source" in r:  # informações da camada
         fonte = r["source"].split("|")[0] if r.get("source") else ""
         campos = ", ".join(f["name"] for f in r.get("fields", [])) or "nenhum"
@@ -68,7 +99,8 @@ def _resumo(result):
                ("formato", "formato"), ("sistema", "sistema"), ("antes", "sistema anterior"),
                ("pasta", "pasta"), ("geopackage", "geopackage"), ("camadas_em_arquivo", "camadas em arquivo"),
                ("acao", "camada"), ("adicionadas", "camadas abertas"), ("grupo", "grupo"),
-               ("estilo_de", "estilo copiado de"),
+               ("estilo_de", "estilo copiado de"), ("campo", "campo"),
+               ("sem_correspondencia", "sem polígono"), ("gdb", "gdb"),
                ("aviso", "aviso")]
     for chave, rot in rotulos:
         if chave in r and r[chave] is not None and r[chave] is not True:
@@ -405,14 +437,25 @@ class QgisIaDockWidget(QDockWidget):
             if isinstance(l, QgsVectorLayer):
                 campos[l.name()] = [f.name() for f in l.fields()]
         layouts = [l.name() for l in QgsProject.instance().layoutManager().printLayouts()]
-        return {"camadas": camadas, "campos": campos, "ativa": self._camada_ativa(),
-                "layouts": layouts}
+        ativa = self._camada_ativa()
+        fonte = ""
+        if ativa:
+            ls = QgsProject.instance().mapLayersByName(ativa)
+            fonte = ls[0].source() if ls else ""
+        return {"camadas": camadas, "campos": campos, "ativa": ativa, "layouts": layouts,
+                "fonte_ativa": fonte, "pasta_projeto": QgsProject.instance().homePath() or ""}
 
     def _contexto_ia(self):
         """Texto com camadas, tipos, campos e estado de edição para a IA."""
         ativa = self._camada_ativa()
         nomes = set(self.get_context_layers())
-        linhas = [f"Camada ativa: {ativa or 'nenhuma'}", "Camadas:"]
+        linhas = [f"Camada ativa: {ativa or 'nenhuma'}"]
+        if ativa:
+            ls = QgsProject.instance().mapLayersByName(ativa)
+            if ls:
+                linhas.append(f"Arquivo da camada ativa: {ls[0].source().split('|')[0]}")
+        linhas.append(f"Pasta do projeto: {QgsProject.instance().homePath() or '(projeto não salvo)'}")
+        linhas.append("Camadas:")
         for l in QgsProject.instance().mapLayers().values():
             if l.name() not in nomes:
                 continue

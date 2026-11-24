@@ -25,8 +25,15 @@ MUTATING = frozenset({
     "commit_edits", "rollback_edits", "undo_edit", "redo_edit",
     "export_layout", "export_map_image", "remove_layout", "save_layer_as",
     "save_layer_to_project", "create_layer", "load_files", "create_group", "move_layer_to_group",
-    "set_layer_crs", "copy_style",
+    "set_layer_crs", "copy_style", "fill_field_by_location",
+    # Planos de Serviço SLU-DF
+    "slu_criar_gdb", "slu_preencher_atributos", "slu_exportar_xlsx",
+    "slu_gerar_programacao_trimestral", "slu_gerar_docx", "slu_exportar_shapefile",
+    "slu_gerar_plano", "slu_redesenhar_coleta", "slu_planilha_soltura",
 })
+
+# Ferramentas que só gravam arquivo quando recebem um parâmetro específico.
+MUTATING_IF_PARAM = {"slu_validar_gdb": ("relatorio_xlsx", "carregar_erros")}
 
 # Execução de Python arbitrário: tem uma chave própria no painel, separada do
 # modo somente leitura, e começa desligada.
@@ -106,6 +113,11 @@ def handle_request(line, funcs, token, read_only=False, allow_code=False):
     if not isinstance(params, dict):
         return {"id": rid, "tool": tool, "ok": False,
                 "error": "'params' deve ser um objeto."}
+
+    if read_only and any(params.get(p) for p in MUTATING_IF_PARAM.get(tool, ())):
+        return {"id": rid, "tool": tool, "ok": False,
+                "error": f"'{tool}' com {'/'.join(MUTATING_IF_PARAM[tool])} bloqueada: o "
+                         "servidor está em modo somente leitura."}
 
     try:
         result = funcs[tool](**params)

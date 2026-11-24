@@ -141,6 +141,100 @@ def select_by_expression(layer_name, expression):
     return {"selected_count": layer.selectedFeatureCount()}
 
 
+def duplicar_camada_com_ra(layer_name, output_name=None, ra_layer=None, ra_name_field=None):
+    """Copia a camada para uma camada temporária (memória) e cria a coluna 'RA'.
+
+    Preenchimento da coluna RA, nesta ordem:
+    1. 'ra_layer' informado: nome da RA cujo polígono contém a feição (ponto na
+       superfície da geometria), lido do campo 'ra_name_field'.
+    2. A camada tem o campo 'codigo_ra': nome da RA pelo domínio do SLU.
+    3. Senão, a coluna fica vazia para preencher depois.
+    """
+    from qgis.core import (QgsFeatureRequest, QgsSpatialIndex, QgsCoordinateTransform,
+                           QgsMapLayer)
+    try:
+        from .. import edital_slu as E
+    except ImportError:
+        import edital_slu as E
+
+    src = _get_layer(layer_name)
+    if src.type() != QgsMapLayer.VectorLayer:
+        raise ValueError(f"'{layer_name}' não é uma camada vetorial")
+    nomes_campos = [f.name().lower() for f in src.fields()]
+    if "ra" in nomes_campos:
+        raise ValueError(f"A camada '{layer_name}' já tem um campo 'RA'.")
+
+    project = QgsProject.instance()
+    nome = output_name or f"{layer_name}_RA"
+    base, n = nome, 2
+    while project.mapLayersByName(nome):
+        nome = f"{base} ({n})"
+        n += 1
+
+    copia = src.materialize(QgsFeatureRequest())
+    copia.setName(nome)
+    prov = copia.dataProvider()
+    try:  # QGIS 3.38+: construtor com QMetaType
+        from qgis.PyQt.QtCore import QMetaType
+        tipo_txt = getattr(QMetaType, "QString", None) or QMetaType.Type.QString
+        campo = QgsField("RA", tipo_txt, len=100)
+    except (ImportError, AttributeError, TypeError):
+        campo = QgsField("RA", QVariant.String, len=100)
+    if not prov.addAttributes([campo]):
+        raise RuntimeError("Não foi possível criar o campo RA na cópia.")
+    copia.updateFields()
+    idx_ra = copia.fields().indexOf("RA")
+
+    origem = "vazio"
+    valores = {}
+    if ra_layer:
+        ras = _get_layer(ra_layer)
+        if ras.type() != QgsMapLayer.VectorLayer or \
+                QgsWkbTypes.geometryType(ras.wkbType()) != QgsWkbTypes.PolygonGeometry:
+            raise ValueError(f"'{ra_layer}' precisa ser uma camada de polígonos")
+        if not ra_name_field:
+            textos = [f.name() for f in ras.fields() if f.type() == QVariant.String]
+            if not textos:
+                raise ValueError(f"Informe ra_name_field: '{ra_layer}' não tem campo de texto")
+            ra_name_field = textos[0]
+        if ras.fields().indexOf(ra_name_field) < 0:
+            raise ValueError(f"Campo '{ra_name_field}' não existe em '{ra_layer}'")
+        poligonos = {f.id(): f for f in ras.getFeatures()}
+        indice = QgsSpatialIndex(ras.getFeatures())
+        xform = QgsCoordinateTransform(copia.crs(), ras.crs(), project.transformContext())
+        for f in copia.getFeatures():
+            g = f.geometry()
+            if g is None or g.isEmpty():
+                continue
+            p = g.pointOnSurface()
+            if copia.crs() != ras.crs():
+                p.transform(xform)
+            for fid in indice.intersects(p.boundingBox()):
+                if poligonos[fid].geometry().contains(p):
+                    valores[f.id()] = {idx_ra: str(poligonos[fid][ra_name_field])}
+                    break
+        origem = f"localização em '{ra_layer}' (campo '{ra_name_field}')"
+    elif "codigo_ra" in nomes_campos:
+        campo_cod = src.fields()[nomes_campos.index("codigo_ra")].name()
+        for f in copia.getFeatures():
+            try:
+                nome_ra = E.RA.get(int(f[campo_cod]))
+            except (TypeError, ValueError):
+                nome_ra = None
+            if nome_ra:
+                valores[f.id()] = {idx_ra: nome_ra}
+        origem = "campo codigo_ra (domínio do SLU)"
+
+    if valores:
+        prov.changeAttributeValues(valores)
+    project.addMapLayer(copia)
+    total = copia.featureCount()
+    return {"layer_name": copia.name(), "output_layer": copia.name(), "feature_count": total,
+            "ra_preenchida": len(valores), "ra_vazia": total - len(valores),
+            "origem_ra": origem,
+            "aviso": "Camada temporária: use export_layer para salvar em arquivo."}
+
+
 def create_memory_layer(name, geometry_type="Point", fields=None, features=None):
     """Cria layer temporário em memória."""
     # Mapeia tipo string para QgsWkbTypes
