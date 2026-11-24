@@ -247,7 +247,7 @@ caso("salvar edição", "commit_edits")
 caso("editar camada", "start_editing", layer_name="lotes")
 nada("faça um mapa temático da população por RA")
 nada("gerar um relatório das rotas")
-nada("qual a área total dos lotes?")
+caso("qual a área total dos lotes?", "measure_total", layer_name="lotes")
 nada("deixar o mapa bonito")
 
 for f in FALHAS:

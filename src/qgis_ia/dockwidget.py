@@ -24,6 +24,27 @@ def _resumo(result):
             return ", ".join(map(str, result)) or "(vazio)"
         return str(result) if result is not None else "OK"
     r = result
+
+    def n(v, casas=2):  # número no jeito brasileiro: 1.234,56
+        if not isinstance(v, (int, float)):
+            return str(v)
+        txt = f"{v:,.{casas}f}" if isinstance(v, float) else f"{v:,}"
+        return txt.replace(",", "§").replace(".", ",").replace("§", ".")
+
+    if "values" in r and "field" in r:
+        mais = " (lista cortada)" if r.get("truncated") else ""
+        vals = ", ".join("(vazio)" if v is None else str(v) for v in r["values"])
+        return f"Valores de '{r['field']}' ({r.get('returned')}){mais}: {vals}"
+    if "mean" in r and "sum" in r:
+        return (f"'{r.get('field')}': {r.get('count')} valores ({r.get('null_count')} vazios) · "
+                f"soma {n(r['sum'])} · média {n(r['mean'])} · mín {n(r['min'])} · máx {n(r['max'])} · "
+                f"mediana {n(r['median'])}")
+    if "area_m2" in r:
+        return (f"Área total de '{r['layer']}' ({r['feicoes']} feições): {n(r['area_m2'])} m² = "
+                f"{n(r['area_ha'], 4)} ha = {n(r['area_km2'], 4)} km²")
+    if "comprimento_m" in r:
+        return (f"Comprimento total de '{r['layer']}' ({r['feicoes']} feições): "
+                f"{n(r['comprimento_m'])} m = {n(r['comprimento_km'], 3)} km")
     if "fields" in r and r.get("fields") and isinstance(r["fields"][0], dict):
         return (f"Campos de '{r.get('layer')}' ({r.get('feature_count')} feições): "
                 + ", ".join(f"{f['name']} ({f['type']})" for f in r["fields"]))
@@ -33,9 +54,12 @@ def _resumo(result):
                ("count", "feições"), ("updated_features", "atualizadas"), ("updated", "atualizadas"),
                ("added", "adicionadas"), ("deleted", "apagadas"), ("saved", "salvas"),
                ("discarded", "descartadas"), ("undone", "desfeito"), ("redone", "refeito"),
-               ("feature_count", "total de feições"), ("editing", "em edição")]
+               ("feature_count", "total de feições"), ("editing", "em edição"),
+               ("selected", "selecionadas"), ("output_path", "arquivo"),
+               ("campo_criado", "campo com a contagem"), ("campo_distancia", "campo com a distância"),
+               ("aviso", "aviso")]
     for chave, rot in rotulos:
-        if chave in r and r[chave] not in (None, True):
+        if chave in r and r[chave] is not None and r[chave] is not True:
             v = r[chave]
             if isinstance(v, list):
                 v = ", ".join(json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else str(x)
@@ -412,10 +436,23 @@ class QgisIaDockWidget(QDockWidget):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         return resp == QMessageBox.Yes
 
+    def _selecionar_saida(self, result):
+        """Camada nova (buffer, recorte...) vira a selecionada: dá para encadear comandos."""
+        if not isinstance(result, dict) or not result.get("output_layer"):
+            return
+        camadas = QgsProject.instance().mapLayersByName(result["output_layer"])
+        if camadas:
+            try:
+                self.iface.setActiveLayer(camadas[0])
+                self.append_chat("👉", f"Camada nova selecionada: {camadas[0].name()}")
+            except Exception:
+                pass
+
     def _mostrar_resultados(self, results):
         for i, res in enumerate(results):
             if res.get("success"):
                 self.append_chat("✅", _resumo(res.get("result")))
+                self._selecionar_saida(res.get("result"))
             else:
                 erro = str(res.get("error", "")).strip().splitlines()
                 self.append_chat("❌", f"Passo {i+1} falhou: {erro[-1] if erro else ''}")

@@ -1479,6 +1479,406 @@ def _item_layout(m, ctx):
     return _plano(f"Adicionar {nomes[item]} no layout{alvo}", "add_layout_item", params)
 
 
+# ======================================================== geoprocessamento
+# Entrada = camada selecionada. A "outra" camada (molde) é citada pelo nome.
+
+def _outra(nome, ctx):
+    """Segunda camada (molde/referência): qualquer camada do projeto, menos a selecionada."""
+    nome = _limpa(re.sub(rf"^(?:{ART})?(?:{_k('camada')}\s+)?", "", (nome or "").strip(), flags=re.I))
+    if not nome:
+        raise ErroComando("Diga a outra camada. Ex.: recortar pela camada Regiões.")
+    achada = _achar(nome, ctx.get("camadas", []), "a camada")
+    if achada == ctx.get("ativa"):
+        raise ErroComando(f"A outra camada não pode ser a própria selecionada ('{achada}').")
+    return achada
+
+
+def _dist(txt):
+    """'50 m', '2 km', '1,5 quilômetros', '300' -> metros (float) ou None."""
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*(km|quil[oô]metros?|m|metros?)?(?=\s|$|,)", txt or "", re.I)
+    if not m:
+        return None
+    v = _num(m.group(1))
+    return v * 1000 if m.group(2) and sem_acento(m.group(2)).startswith(("km", "quil")) else v
+
+
+_SO_SEL = _alt("só nas selecionadas", "só das selecionadas", "só as selecionadas", "nas selecionadas",
+               "das selecionadas", "apenas nas selecionadas", "só da seleção", "só na seleção",
+               "da seleção", "só os selecionados", "nos selecionados")
+_COMO = r"\s+(?:como|" + _k("com o nome") + "|" + _k("com nome") + "|" + _k("chamada") + "|" + _k("chamado") + r")\s+(?P<saida>.+?)\s*$"
+
+
+def _opcoes_geo(resto):
+    """Tira 'só nas selecionadas' e 'como NOME' do texto. Devolve (resto, params extras)."""
+    extra = {}
+    resto = " " + resto + " "
+    resto, ms = _tirar(r"\s,?\s*\(?" + _SO_SEL + r"\)?(?=\s)", resto)
+    if ms:
+        extra["only_selected"] = True
+    mc = re.search(_COMO, resto, re.I)
+    if mc:
+        extra["output_name"] = _limpa(mc.group("saida"))
+        resto = resto[:mc.start()]
+    return " ".join(resto.split()), extra
+
+
+def _geo(descricao, tool, ctx, extra, **params):
+    camada = _ativa(ctx)
+    p = {"tool": tool, "layer_name": camada}
+    p.update({k: v for k, v in params.items() if v is not None})
+    p.update(extra)
+    sel = " (só nas selecionadas)" if extra.get("only_selected") else ""
+    return _plano(f"{descricao} de '{camada}'{sel}", "geoprocess", p)
+
+
+def _sem_camada_propria(txt, ctx):
+    """O que sobrou da frase só pode ser a própria camada selecionada ('nos lotes',
+    'na camada lotes'); outra camada ou palavra desconhecida dá erro (regra 1)."""
+    return _camada_sobra(txt or "", ctx)
+
+
+@comando(r"(?:(?:" + V_CRIAR + r")\s+)?(?:" + ART + r")?(?:" + _alt("buffer", "área de influência", "area de influencia",
+         "zona de influência", "faixa", "entorno", "raio") + r")(?:\s+(?P<resto>.+?))?", "buffer de 50 m")
+def _buffer(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto") or "")
+    resto, md = _tirar(r"\s,?\s*(?:e\s+)?(?:" + _alt("dissolvido", "dissolvida", "dissolver", "unido", "unida",
+                       "juntando tudo", "juntando", "unificado", "sem sobreposição") + r")(?=\s|$)", " " + resto + " ")
+    d = _dist(resto)
+    if d is None:
+        raise ErroComando("Diga a distância. Ex.: buffer de 50 m · buffer de 2 km dissolvido.")
+    _sem_camada_propria(re.sub(r"\d+(?:[.,]\d+)?\s*\w*", " ", resto).strip(), ctx)
+    return _geo(f"Buffer de {d:g} m{' dissolvido' if md else ''}", "buffer", ctx, extra,
+                distance=d, dissolve=True if md else None)
+
+
+@comando(r"(?:" + _alt("dissolver", "dissolva", "dissolve", "juntar tudo", "junte tudo", "unir tudo",
+                       "una tudo", "agrupar geometrias", "agrupe as geometrias", "juntar as feições",
+                       "juntar feições", "fundir", "funda") + r")(?P<resto>(?:\s.*?)?)", 'dissolver por "bairro"')
+def _dissolver(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto"))
+    if re.search(r"\b(?:por|pelo|pela|usando)\b", resto, re.I) or _aspas(resto):
+        nomes = _exige_aspas(resto, 'dissolver por "bairro"')
+        camada = _ativa(ctx)
+        campos = [_campo(n, camada, ctx) for n in nomes]
+        txt = ", ".join(f"'{c}'" for c in campos)
+        return _geo(f"Dissolver por {txt}", "dissolve", ctx, extra,
+                    field=campos if len(campos) > 1 else campos[0])
+    return _geo("Dissolver tudo numa geometria", "dissolve", ctx, extra)
+
+
+_MOLDE = r"\s+(?:(?:" + _alt("pela", "pelo", "por", "com", "usando", "contra", "em relação a", "e") + r")\s+)?(?P<outra>.+?)"
+
+
+@comando(r"(?:" + _alt("recortar", "recorte", "recorta", "cortar", "corte", "clip", "clipar") + r")(?:\s+"
+         + ART + r"(?:" + _k("camada") + r"|" + N_FEICAO + r"))?" + _MOLDE, "recortar pela camada Regiões")
+def _recortar(m, ctx):
+    outra, extra = _opcoes_geo(m.group("outra"))
+    o = _outra(outra, ctx)
+    return _geo(f"Recortar pelo limite de '{o}'", "clip", ctx, extra, overlay=o)
+
+
+@comando(r"(?:" + _alt("interseção", "intersecção", "intersecao", "interseccao", "intersectar", "intersecte",
+                       "fazer interseção", "faça a interseção", "cruzar", "cruze", "sobrepor", "sobreponha")
+         + r")" + _MOLDE, "interseção com Regiões")
+def _intersecao(m, ctx):
+    outra, extra = _opcoes_geo(m.group("outra"))
+    if re.search(_alt("atributos", "dados", "campos"), outra, re.I):
+        return None  # 'cruzar atributos com X' é junção espacial
+    o = _outra(outra, ctx)
+    return _geo(f"Interseção com '{o}'", "intersection", ctx, extra, overlay=o)
+
+
+@comando(r"(?:" + _alt("diferença", "diferenca", "subtrair", "subtraia", "subtrai", "apagar a parte que está em",
+                       "tirar a parte que está em", "tirar a área de", "remover a área de", "excluir a área de",
+                       "apagar o que está dentro de", "tirar o que está dentro de", "descontar") + r")" + _MOLDE,
+         "diferença com Regiões", primeiro=True)
+def _diferenca(m, ctx):
+    outra, extra = _opcoes_geo(m.group("outra"))
+    o = _outra(outra, ctx)
+    return _geo(f"Tirar a parte que cai em '{o}'", "difference", ctx, extra, overlay=o)
+
+
+@comando(r"(?:" + _alt("união com", "uniao com", "unir com", "una com", "fazer união com") + r")\s+(?P<outra>.+?)",
+         "união com Regiões")
+def _uniao(m, ctx):
+    outra, extra = _opcoes_geo(m.group("outra"))
+    o = _outra(outra, ctx)
+    return _geo(f"União com '{o}'", "union", ctx, extra, overlay=o)
+
+
+@comando(r"(?:" + _alt("mesclar", "mescle", "mescla", "juntar", "junte", "junta", "combinar", "combine", "somar",
+                       "agregar") + r")\s+(?:com|a|às|as)\s+(?:" + ART + r")?(?:" + _alt("camadas", "camada") + r"\s+)?(?P<outras>.+?)",
+         "mesclar com lotes_sul e lotes_norte")
+def _mesclar(m, ctx):
+    outras, extra = _opcoes_geo(m.group("outras"))
+    if re.search(_alt("atributos", "dados", "campos", "mais próximo", "mais proximo"), outras, re.I):
+        return None
+    nomes = [_outra(n, ctx) for n in re.split(r"\s*,\s*|\s+e\s+", outras) if n.strip()]
+    txt = ", ".join(f"'{n}'" for n in nomes)
+    return _geo(f"Mesclar com {txt}", "merge", ctx, extra, overlays=nomes)
+
+
+_CRS_NOMES = [
+    (_alt("sirgas 2000 utm 23s", "sirgas utm 23s", "utm 23s", "utm 23 sul", "utm zona 23s", "utm 23"), "EPSG:31983"),
+    (_alt("sirgas 2000 utm 22s", "sirgas utm 22s", "utm 22s", "utm 22 sul", "utm 22"), "EPSG:31982"),
+    (_alt("sirgas 2000 utm 24s", "sirgas utm 24s", "utm 24s", "utm 24 sul", "utm 24"), "EPSG:31984"),
+    (_alt("wgs84", "wgs 84", "graus", "lat long", "latitude e longitude", "geográfica", "geografica",
+          "gps", "google earth"), "EPSG:4326"),
+    (_alt("sirgas 2000", "sirgas", "sirgas geográfico"), "EPSG:4674"),
+    (_alt("web mercator", "pseudo mercator", "google maps"), "EPSG:3857"),
+]
+
+
+def _crs_txt(txt):
+    t = re.sub(rf"^(?:{ART})?(?:{_alt('o sistema', 'sistema', 'crs', 'projeção', 'projecao', 'srid')}\s+)?", "",
+               _limpa(txt), flags=re.I).strip()
+    m = re.fullmatch(r"(?:epsg\s*[: ]?\s*)?(\d{4,6})", t, re.I)
+    if m:
+        return f"EPSG:{m.group(1)}"
+    for pad, cod in _CRS_NOMES:
+        if re.fullmatch(rf"(?:{pad})", t, re.I):
+            return cod
+    return None
+
+
+@comando(r"(?:" + _alt("reprojetar", "reprojete", "reprojeta", "converter o sistema", "mudar o sistema",
+                       "mude o sistema", "mudar a projeção", "mude a projeção", "converter as coordenadas",
+                       "transformar o sistema", "converter", "converta", "transformar", "transforme")
+         + r")(?:\s+" + ART + _k("camada") + r")?\s+(?:para|pra|em)\s+(?P<crs>.+?)", "reprojetar para 31983")
+def _reprojetar(m, ctx):
+    crs_txt, extra = _opcoes_geo(m.group("crs"))
+    crs = _crs_txt(crs_txt)
+    if crs is None:
+        verbo = sem_acento(m.group(0)).split()[0]
+        if verbo.startswith(("convert", "transform")):
+            return None  # 'converter polígonos em linhas' etc.
+        raise ErroComando("Sistema não reconhecido. Ex.: reprojetar para 31983 · para SIRGAS 2000 UTM 23S · "
+                          "para WGS84.")
+    return _geo(f"Reprojetar para {crs}", "reproject", ctx, extra, crs=crs)
+
+
+@comando(r"(?:(?:" + V_CRIAR + r")\s+)?(?:" + ART + r")?(?:" + _alt("centroides", "centróides", "centroide",
+         "centróide", "pontos no centro", "ponto no centro", "ponto central", "pontos centrais") + r")(?P<resto>(?:\s.*?)?)",
+         "gerar centroides")
+def _centroides(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto"))
+    return _geo("Gerar um ponto no centro de cada feição", "centroids", ctx, extra)
+
+
+@comando(r"(?:(?:" + V_CRIAR + r")\s+)?(?:" + ART + r")?(?:" + _alt("fecho convexo", "envoltória", "envoltoria",
+         "envoltória convexa", "polígono envolvente", "poligono envolvente", "contorno externo") + r")(?P<resto>(?:\s.*?)?)",
+         "envoltória de tudo")
+def _envoltoria(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto"))
+    if re.search(_alt("de tudo", "geral", "única", "unica", "do conjunto", "de todas", "total"), resto, re.I):
+        return _geo("Envoltória de todas as feições juntas", "convex_hull_all", ctx, extra)
+    return _geo("Envoltória de cada feição", "convex_hull", ctx, extra)
+
+
+@comando(r"(?:" + _alt("simplificar", "simplifique", "simplifica", "generalizar", "generalize") + r")(?P<resto>(?:\s.*?)?)",
+         "simplificar 5 m")
+def _simplificar(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto"))
+    d = _dist(resto)
+    if d is None:
+        raise ErroComando("Diga a tolerância. Ex.: simplificar 5 m.")
+    return _geo(f"Simplificar com tolerância de {d:g} m", "simplify", ctx, extra, tolerance=d)
+
+
+@comando(r"(?:" + _alt("junção espacial com", "juncao espacial com", "junção espacial de", "join espacial com",
+                       "juntar atributos de", "juntar os atributos de", "trazer atributos de", "trazer os atributos de",
+                       "trazer os dados de", "trazer dados de", "trazer os campos de", "pegar os atributos de",
+                       "pegar atributos de", "pegar os dados de", "cruzar atributos com", "cruzar os atributos com",
+                       "cruzar os dados com") + r")\s+(?P<outra>.+?)", "trazer atributos de Regiões")
+def _juncao(m, ctx):
+    outra, extra = _opcoes_geo(m.group("outra"))
+    outra, mt = _tirar(r"\s,?\s*\(?" + _alt("todos", "um para muitos", "todas as correspondências", "repetindo")
+                       + r"\)?(?=\s|$)", " " + outra + " ")
+    o = _outra(outra.strip(), ctx)
+    return _geo(f"Trazer os atributos de '{o}' pela localização", "spatial_join", ctx, extra,
+                overlay=o, one_to_one=False if mt else None)
+
+
+@comando(r"(?:" + _alt("mais próximo de", "mais proximo de", "o mais próximo de", "a mais próxima de",
+                       "juntar pelo mais próximo de", "juntar ao mais próximo de", "ligar ao mais próximo de",
+                       "distância até", "distancia ate", "distância para", "distância ao mais próximo de",
+                       "vizinho mais próximo em", "trazer o mais próximo de") + r")\s+(?P<outra>.+?)",
+         "mais próximo de pontos_coleta")
+def _mais_proximo(m, ctx):
+    outra, extra = _opcoes_geo(m.group("outra"))
+    o = _outra(outra, ctx)
+    return _geo(f"Achar o mais próximo em '{o}' (com a distância)", "nearest_join", ctx, extra, overlay=o)
+
+
+@comando(r"(?:" + _alt("contar", "conte", "conta", "quantos", "quantas") + r")\s+(?:" + ART + r")?(?:"
+         + _alt("pontos", "feições", "feicoes", "registros", "itens") + r"\s+)?(?:(?:de|da|do|dos|das)\s+)?(?:"
+         + _k("camada") + r"\s+)?(?P<outra>.+?)\s+(?:" + _alt("em cada", "dentro de cada", "por", "tem em cada",
+         "há em cada", "caem em cada", "existem em cada") + r")\s+(?:" + _alt("polígono", "poligono", "área",
+         "area", "região", "regiao", "feição", "feicao", "setor", "quadra", "lote", "um") + r")",
+         "contar pontos de pontos_coleta em cada polígono", primeiro=True)
+def _contar_pontos(m, ctx):
+    outra, extra = _opcoes_geo(m.group("outra"))
+    o = _outra(outra, ctx)
+    return _geo(f"Contar quantos '{o}' caem em cada polígono", "count_points", ctx, extra, overlay=o)
+
+
+def _simples(padrao, tool, descricao, exemplo):
+    @comando(padrao + r"(?P<resto>(?:\s.*?)?)", exemplo, primeiro=True)
+    def _f(m, ctx):
+        resto, extra = _opcoes_geo(m.group("resto"))
+        return _geo(descricao, tool, ctx, extra)
+    return _f
+
+
+_simples(r"(?:" + _alt("corrigir", "corrija", "consertar", "conserte", "arrumar", "arrume", "reparar", "repare",
+                       "validar e corrigir") + r")\s+(?:" + ART + r")?" + _alt("geometrias", "geometria", "geometrias inválidas"),
+         "fix_geometries", "Corrigir as geometrias", "corrigir geometrias")
+_simples(r"(?:" + _alt("explodir", "exploda", "separar as partes", "separe as partes", "separar multipartes",
+                       "multipartes para partes simples", "multiparte para simples", "desagregar", "desagregue") + r")",
+         "single_parts", "Separar as multipartes em feições simples", "explodir multipartes")
+_simples(r"(?:" + V_APAGAR + r"|" + _alt("limpar", "limpe") + r")\s+(?:" + ART + r")?(?:" + _alt("geometrias", "feições",
+         "feicoes", "registros") + r"\s+)?" + _alt("duplicadas", "duplicados", "repetidas", "repetidos"),
+         "delete_duplicates", "Remover geometrias duplicadas", "remover duplicadas")
+_simples(r"(?:(?:" + _alt("extrair", "extraia", "gerar", "gere", "criar") + r")\s+)?(?:" + ART + r")?"
+         + _alt("vértices", "vertices", "nós dos polígonos"),
+         "extract_vertices", "Extrair os vértices", "extrair vértices")
+_simples(r"(?:(?:" + _alt("converter", "converta", "transformar", "transforme", "passar") + r")\s+)?(?:" + ART + r")?"
+         + _alt("polígonos", "poligonos", "polígono", "poligono") + r"\s+(?:em|para|pra)\s+" + _alt("linhas", "linha"),
+         "polygons_to_lines", "Converter polígonos em linhas", "polígonos para linhas")
+_simples(r"(?:(?:" + _alt("converter", "converta", "transformar", "transforme", "passar", "fechar") + r")\s+)?(?:" + ART + r")?"
+         + _alt("linhas", "linha") + r"\s+(?:em|para|pra)\s+" + _alt("polígonos", "poligonos", "polígono", "poligono"),
+         "lines_to_polygons", "Converter linhas em polígonos", "linhas para polígonos")
+
+
+@comando(r"(?:(?:" + V_CRIAR + r")\s+)?(?:" + ART + r")?(?:" + _alt("grade", "grid", "malha", "quadrícula", "quadricula",
+         "grade hexagonal", "malha hexagonal") + r")(?P<resto>(?:\s.*?)?)", "grade de 500 m", primeiro=True)
+def _grade(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto"))
+    extra.pop("only_selected", None)
+    d = _dist(resto)
+    if d is None:
+        raise ErroComando("Diga o tamanho da célula. Ex.: grade de 500 m · grade hexagonal de 1 km.")
+    tipo = "hexagon" if re.search(_alt("hexagonal", "hexágonos", "hexagonos", "colmeia"), m.group(0), re.I) else None
+    return _geo(f"Grade {'hexagonal ' if tipo else ''}de {d:g} m sobre a extensão", "grid", ctx, extra,
+                distance=d, grid_type=tipo)
+
+
+_RELACOES = [
+    (_alt("dentro de", "dentro da", "dentro do", "que estão dentro de", "que estao dentro de", "contidos em",
+          "contidas em", "inteiramente em"), "within", "dentro de"),
+    (_alt("que tocam", "que encostam em", "que encostam na", "encostando em", "vizinhos de", "vizinhas de"),
+     "touches", "que tocam"),
+    (_alt("que cruzam", "que atravessam", "atravessando"), "crosses", "que cruzam"),
+    (_alt("que contêm", "que contem", "que contém"), "contains", "que contêm"),
+    (_alt("fora de", "fora da", "fora do", "que não tocam", "longe de"), "disjoint", "fora de"),
+    (_alt("que intersectam", "que cruzam com", "que caem em", "que estão em", "que estao em", "em cima de",
+          "sobre", "que pegam", "que tocam em", "dentro ou tocando"), "intersects", "que encostam ou caem em"),
+]
+
+
+@comando(V_SELEC + r"\s+(?:(?:" + _alt("os", "as", "todos os", "todas as", "feições", "feicoes", "as feições",
+         "os registros", "os pontos", "os lotes", "as linhas") + r")\s+)*(?P<resto>(?:a\s+até|até|a\s+menos\s+de|"
+         r"num\s+raio\s+de|em\s+um\s+raio\s+de|perto\s+de|próximos\s+de|proximos\s+de|próximas\s+de|"
+         + "|".join(p for p, _, _ in _RELACOES) + r").+?)", "selecionar dentro de Regiões", primeiro=True)
+def _selecionar_local(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto"))
+    extra.pop("output_name", None)
+    md = re.match(r"(?:a\s+até|até|ate|a\s+menos\s+de|num\s+raio\s+de|em\s+um\s+raio\s+de)\s+(?P<d>\d+(?:[.,]\d+)?\s*\w*)\s+(?:de|da|do|dos|das)\s+(?P<o>.+)",
+                  resto, re.I)
+    camada = _ativa(ctx)
+    if md:
+        d = _dist(md.group("d"))
+        o = _outra(md.group("o"), ctx)
+        return _plano(f"Selecionar em '{camada}' as feições a até {d:g} m de '{o}'", "select_by_location",
+                      {"layer_name": camada, "overlay": o, "distance": d})
+    mp = re.match(r"(?:perto|próximos|proximos|próximas|proximas)\s+(?:de|da|do)\s+(?P<o>.+)", resto, re.I)
+    if mp:
+        raise ErroComando("Diga a distância. Ex.: selecionar a até 50 m de Vias Principais.")
+    for pad, pred, nome in _RELACOES:
+        mr = re.match(rf"(?:{pad})\s+(?P<o>.+)", resto, re.I)
+        if mr:
+            o = _outra(mr.group("o"), ctx)
+            return _plano(f"Selecionar em '{camada}' as feições {nome} '{o}'", "select_by_location",
+                          {"layer_name": camada, "overlay": o, "predicate": pred})
+    return None
+
+
+# --- consultas
+@comando(r"(?:" + _alt("área total", "area total", "qual a área total", "qual a area total", "soma das áreas",
+                       "soma das areas", "comprimento total", "extensão total", "extensao total",
+                       "qual o comprimento total", "quantos km", "quantos metros", "quantos hectares",
+                       "medir", "meça", "medida total") + r")(?P<resto>(?:\s.*?)?)\??", "área total", primeiro=True)
+def _medir(m, ctx):
+    resto, extra = _opcoes_geo(m.group("resto"))
+    _sem_camada_propria(re.sub(rf"^(?:{_PREP}\s+)?", "", resto), ctx) if resto else None
+    camada = _ativa(ctx)
+    p = {"layer_name": camada}
+    if extra.get("only_selected"):
+        p["only_selected"] = True
+    return _plano(f"Medir área/comprimento total de '{camada}'", "measure_total", p)
+
+
+@comando(r"(?:" + _alt("estatísticas", "estatisticas", "estatística", "estatistica", "resumo", "resumir", "soma",
+                       "média", "media", "mínimo", "minimo", "máximo", "maximo", "total") + r")\s+(?:(?:" + _alt("do campo",
+         "da coluna", "de", "do", "da") + r")\s+)?(?P<resto>.+?)", 'estatísticas de "populacao"')
+def _estatisticas(m, ctx):
+    if not _aspas(m.group("resto")):
+        if re.search(_alt("área", "area", "comprimento", "extensão"), m.group("resto"), re.I):
+            return None
+        raise ErroComando(MSG_ASPAS.format('estatísticas de "populacao"'))
+    camada = _ativa(ctx)
+    campo = _campo(_aspas(m.group("resto"))[0], camada, ctx)
+    return _plano(f"Estatísticas do campo '{campo}' de '{camada}'", "get_field_statistics",
+                  {"layer_name": camada, "field": campo})
+
+
+@comando(r"(?:(?:" + V_LISTAR + r")\s+)?(?:" + ART + r")?(?:" + _alt("valores únicos", "valores unicos",
+         "valores distintos", "valores diferentes", "quais valores", "que valores") + r")\s+(?:(?:" + _alt("do campo",
+         "da coluna", "de", "do", "da", "tem", "existem em", "há em") + r")\s+)?(?P<resto>.+?)", 'valores únicos de "bairro"')
+def _valores(m, ctx):
+    nomes = _exige_aspas(m.group("resto"), 'valores únicos de "bairro"')
+    camada = _ativa(ctx)
+    campo = _campo(nomes[0], camada, ctx)
+    return _plano(f"Valores distintos de '{campo}' em '{camada}'", "get_unique_values",
+                  {"layer_name": camada, "field": campo, "limit": 200})
+
+
+# --- gravar camada em arquivo
+_FMT_CAMADA = _alt("gpkg", "geopackage", "shp", "shapefile", "geojson", "json", "csv", "kml", "dxf", "xlsx", "excel")
+
+
+@comando(r"(?:" + _alt("exportar", "exporte", "exporta", "salvar", "salve", "salva", "gravar", "grave", "grava")
+         + r")\s+(?P<resto>(?:" + ART + r")?(?:" + _k("camada") + r"|" + _alt("selecionadas", "seleção") + r"|.*?" + _FMT_CAMADA
+         + r").*?)", "exportar camada em shapefile", primeiro=True)
+def _salvar_camada(m, ctx):
+    resto = " " + m.group("resto") + " "
+    if re.search(N_LAYOUT, resto, re.I) or \
+            re.search(r"\b(?:pdf|png|jpg|jpeg|svg|tif)\b", resto, re.I) or re.search(r"\bprojeto\b", resto, re.I):
+        return None  # layout / imagem / projeto têm comando próprio
+    if re.search(_alt("edição", "edicao", "edições", "alterações"), resto, re.I):
+        return None  # 'salvar edição'
+    params = {}
+    resto, mc = _tirar(r"\s(?:em|para|pra|na pasta|no arquivo|no caminho|como|no)\s+(?P<p>[A-Za-z]:[\\/].*|\\\\.+|~[\\/].*)\s*$", resto)
+    if mc:
+        params["output_path"] = mc.group("p").strip().strip('"')
+    resto, ms = _tirar(r"\s,?\s*\(?(?:" + _SO_SEL + "|" + _alt("selecionadas", "a seleção", "seleção") + r")\)?(?=\s)", resto)
+    if ms:
+        params["only_selected"] = True
+    mf = re.search(r"(?:^|\s)(?:em\s+|para\s+|como\s+|no\s+formato\s+|formato\s+)?(?P<f>" + _FMT_CAMADA + r")(?=\s|$)", resto, re.I)
+    if mf:
+        f = sem_acento(mf.group("f"))
+        params["format"] = {"geopackage": "gpkg", "shapefile": "shp", "json": "geojson", "excel": "xlsx"}.get(f, f)
+        resto = resto[:mf.start()] + " " + resto[mf.end():]
+    sobra = re.sub(rf"(?:{ART})?{_k('camada')}|\b(?:em|para|como|no|na|a|o|de|da)\b", " ", resto, flags=re.I).strip()
+    if sobra:
+        _camada(sobra, ctx)  # só a selecionada
+    camada = _ativa(ctx)
+    params["layer_name"] = camada
+    fmt = params.get("format") or (os.path.splitext(params.get("output_path", ""))[1].lstrip(".") or "gpkg")
+    onde = params.get("output_path", "pasta do projeto")
+    return _plano(f"Gravar '{camada}' em {fmt.upper()} ({onde})", "save_layer_as", params)
+
+
 # --- visibilidade (por último: 'mostrar X' é bem genérico)
 @comando(r"(?P<v>" + _alt("esconder", "esconda", "esconde", "ocultar", "oculte", "oculta", "desligar",
                           "desligue", "desliga", "mostrar", "mostre", "mostra", "exibir", "exiba", "exibe",

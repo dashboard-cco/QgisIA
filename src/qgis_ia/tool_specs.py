@@ -367,6 +367,38 @@ TOOLS = {
               "format": {"type": "string", "enum": ["pdf", "png", "jpg", "tif", "svg"]},
               "dpi": _I})),
 
+    # ------------------------------------------------------ geoprocessamento
+    "geoprocess": (
+        "Geoprocessamento na camada (resultado vira camada nova no projeto, nome único). "
+        "tool: buffer, dissolve, clip, intersection, difference, union, merge, reproject, "
+        "centroids, convex_hull, convex_hull_all, simplify, spatial_join, nearest_join, "
+        "count_points, fix_geometries, single_parts, delete_duplicates, extract_vertices, "
+        "polygons_to_lines, lines_to_polygons, grid. Distâncias em metros (CRS projetado).",
+        _obj({"tool": _S, "layer_name": _LAYER,
+              "overlay": _s("Segunda camada (recorte, interseção, junção, contagem...)"),
+              "overlays": {"type": "array", "items": _S, "description": "Camadas para merge"},
+              "distance": _s("Metros (buffer, grade)"), "field": _s("Campo do dissolve"),
+              "crs": _s("Destino do reproject, ex.: EPSG:31983"), "tolerance": _N,
+              "dissolve": _B, "one_to_one": _B,
+              "grid_type": {"type": "string", "enum": ["rectangle", "hexagon", "diamond", "point"]},
+              "only_selected": _B, "output_name": _S},
+             ["tool", "layer_name"])),
+    "select_by_location": (
+        "Seleciona feições pela relação espacial com outra camada (ou a até X metros dela).",
+        _obj({"layer_name": _LAYER, "overlay": _S,
+              "predicate": {"type": "string", "enum": ["intersects", "within", "contains", "touches",
+                                                       "crosses", "overlaps", "disjoint", "equals"]},
+              "distance": _N, "mode": {"type": "string", "enum": ["new", "add", "remove", "intersect"]}},
+             ["layer_name", "overlay"])),
+    "measure_total": (
+        "Área total (polígonos) ou comprimento total (linhas), elipsoidal.",
+        _obj({"layer_name": _LAYER, "only_selected": _B}, ["layer_name"])),
+    "save_layer_as": (
+        "Grava a camada em arquivo: gpkg, shp, geojson, csv, kml, dxf, xlsx. Sem caminho: "
+        "pasta do projeto. [grava arquivo]",
+        _obj({"layer_name": _LAYER, "output_path": _S, "format": _S, "only_selected": _B},
+             ["layer_name"])),
+
     # ----------------------------------------------------------- avançado
     "execute_code": (
         "Executa código PyQGIS arbitrário no QGIS e devolve o que foi impresso. "

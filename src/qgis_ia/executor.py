@@ -3,7 +3,7 @@
 Executor - Executa planos JSON no QGIS (sandbox seguro)
 """
 import traceback
-from .actions import layers, processing, layout, expressions, editing, styling, mapas, inspection
+from .actions import layers, processing, layout, expressions, editing, styling, mapas, inspection, geoproc
 
 # Ações que apagam ou descartam dados: o painel pede confirmação antes.
 DESTRUTIVAS = frozenset({
@@ -63,6 +63,10 @@ ACTIONS.update(styling.TOOLS)
 ACTIONS.update(mapas.TOOLS)
 ACTIONS["set_layer_visibility"] = inspection.set_layer_visibility
 ACTIONS["save_project"] = inspection.save_project
+# Geoprocessamento (camada selecionada como entrada) e consultas
+ACTIONS.update(geoproc.TOOLS)
+ACTIONS["get_field_statistics"] = inspection.get_field_statistics
+ACTIONS["get_unique_values"] = inspection.get_unique_values
 
 
 def execute_plan(plan):

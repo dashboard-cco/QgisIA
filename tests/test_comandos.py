@@ -170,7 +170,7 @@ caso("Selecionar onde abre aspas bairro fecha aspas igual a Centro.", "select_fe
 caso('por favor, apagar campo "uso"', "delete_field", field_name="uso")
 
 # --- vai para a IA
-nada("crie um buffer de 100 m nas vias")
+erro("crie um buffer de 100 m nas vias", contem=SELECIONE)
 nada("faça um mapa temático da população por RA")
 nada("qual a média da área dos lotes?")
 nada("apagar feições de lotes")

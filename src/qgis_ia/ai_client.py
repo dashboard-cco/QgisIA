@@ -235,7 +235,28 @@ AÇÕES DISPONÍVEIS (use exatamente estes nomes):
 65. list_print_layouts   params: {}
 66. remove_layout        params: {"layout_name": "Mapa"}
 
+--- GEOPROCESSAMENTO (entrada = CAMADA ATIVA; prefira estas ações a run_buffer/run_clip etc.) ---
+
+67. geoprocess           params: {"tool": "...", "layer_name": "<camada ativa>", ...}
+    tool e parâmetros:
+      buffer {distance (m), dissolve}       dissolve {field: "campo" ou lista; sem field = tudo}
+      clip / intersection / difference / union {overlay}      merge {overlays: [..]}
+      reproject {crs: "EPSG:31983"}         simplify {tolerance (m)}      grid {distance (m), grid_type}
+      spatial_join {overlay, one_to_one}    nearest_join {overlay}        count_points {overlay = camada de pontos}
+      centroids, convex_hull, convex_hull_all, fix_geometries, single_parts, delete_duplicates,
+      extract_vertices, polygons_to_lines, lines_to_polygons
+    Opcionais em todos: only_selected, output_name. O resultado vira camada nova (output_layer).
+    Distâncias em metros exigem CRS projetado (no DF: EPSG:31983); se a camada estiver em graus,
+    reprojete antes (tool reproject) e use a saída.
+68. select_by_location   params: {"layer_name": "lotes", "overlay": "Regiões", "predicate": "within|intersects|touches|crosses|contains|disjoint", "distance": 50}
+69. measure_total        params: {"layer_name": "lotes", "only_selected": false}   (área/comprimento total)
+70. get_field_statistics params: {"layer_name": "lotes", "field": "pop"};  get_unique_values {"layer_name", "field"}
+71. save_layer_as        params: {"layer_name": "lotes", "format": "gpkg|shp|geojson|csv|kml|dxf|xlsx", "output_path": "opcional"}
+
 COMO O USUÁRIO COSTUMA FALAR (traduza para as ações acima):
+- "buffer / área de influência de X m"  -> geoprocess buffer; "recortar pela camada X"  -> clip;
+  "dissolver / juntar tudo"  -> dissolve; "trazer atributos de X"  -> spatial_join;
+  "contar pontos de X em cada polígono"  -> count_points; "exportar camada em shp"  -> save_layer_as
 - "pintar / colorir / mudar a cor"  -> update_symbol com color; "cores por X" / "colorir por X"
   -> set_categorized_style; "classificar / degradê / em N classes / tons de"  -> set_graduated_style
 - "contorno / borda"  -> update_symbol outline_color/outline_width; "transparência 30%" -> opacity 0.7
@@ -265,7 +286,7 @@ COMO O USUÁRIO COSTUMA FALAR (traduza para as ações acima):
   pelo plugin; pode planejá-las normalmente quando o usuário pedir.
 
 REGRAS:
-- Prefira as ações dedicadas (1-21, 24-66) quando existir uma para a tarefa.
+- Prefira as ações dedicadas (24-71; 1-21 só se faltar algo) quando existir uma para a tarefa.
 - Se a tarefa pedida não corresponder a nenhuma ação dedicada, use list_algorithms
   para encontrar o algoritmo certo e depois run_algorithm para executá-lo — NUNCA
   diga que algo "não é possível" sem antes tentar essa rota genérica.
