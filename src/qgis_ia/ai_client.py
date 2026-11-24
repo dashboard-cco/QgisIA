@@ -205,7 +205,45 @@ AÇÕES DISPONÍVEIS (use exatamente estes nomes):
 47. undo_edit / redo_edit  params: {"layer_name": "lotes", "steps": 1}
 48. edit_status          params: {}
 
+--- MAPAS (simbologia, rótulos, fundo, ordem, escala) ---
+
+49. update_symbol        params: {"layer_name": "lotes", "color": "#1f78b4", "outline_color": "#000000", "outline_width": 0.5, "size": 2, "no_fill": false}
+    Ajusta o símbolo atual (todos opcionais). color troca para cor única; contorno/tamanho
+    valem também para estilos categorizados/graduados sem desfazê-los.
+50. set_categorized_style  params: {"layer_name": "lotes", "field": "bairro"}   (uma cor por valor)
+51. set_graduated_style  params: {"layer_name": "lotes", "field": "pop" ou "$area", "classes": 5,
+    "mode": "EqualInterval|Quantile|Jenks|StdDev|Pretty", "color_start": "#fde0dd", "color_end": "#e31a1c"}
+52. set_labels           params: {"layer_name": "lotes", "field": "nome" ou expressão, "enabled": true, "size": 10, "color": "#000000", "bold": false, "buffer": true}
+53. set_layer_opacity    params: {"layer_name": "lotes", "opacity": 0.5}   (0 transparente, 1 opaca)
+54. add_basemap          params: {"source": "osm|esri_satellite|esri_topo|carto_light|carto_dark|google_satellite|google_hybrid|google_maps"}
+55. set_layer_visibility params: {"layer_name": "lotes", "visible": false}  (sem layer_name: todas)
+56. move_layer           params: {"layer_name": "lotes", "position": "top|bottom|up|down"}
+57. zoom_full            params: {}
+58. set_scale            params: {"scale": 5000}   (1:5.000)
+59. export_map_image     params: {"output_path": "C:/saida/mapa.png"}  (opcional; padrão: pasta do projeto)
+60. save_project         params: {"path": "C:/projetos/x.qgz"}  (opcional)
+
+--- LAYOUTS DE IMPRESSÃO ---
+
+61. create_print_layout  params: {"title": "Mapa de Lotes", "subtitle": "...", "page_size": "A4", "orientation": "landscape|portrait",
+    "legend": true, "scalebar": true, "north_arrow": true, "layout_name": "opcional"}
+    Já sai pronto: título, mapa com o enquadramento atual, legenda, escala e norte.
+62. add_layout_item      params: {"item": "legend|scalebar|north_arrow|title|text", "layout_name": "Mapa", "text": "..."}
+63. export_layout        params: {"layout_name": "Mapa", "format": "pdf|png|jpg|tif|svg", "output_path": "opcional", "dpi": 300}
+    Sem output_path salva na pasta do projeto com o nome do layout. layout_name é opcional se só houver um.
+64. open_layout          params: {"layout_name": "Mapa"}
+65. list_print_layouts   params: {}
+66. remove_layout        params: {"layout_name": "Mapa"}
+
 COMO O USUÁRIO COSTUMA FALAR (traduza para as ações acima):
+- "pintar / colorir / mudar a cor"  -> update_symbol com color; "cores por X" / "colorir por X"
+  -> set_categorized_style; "classificar / degradê / em N classes / tons de"  -> set_graduated_style
+- "contorno / borda"  -> update_symbol outline_color/outline_width; "transparência 30%" -> opacity 0.7
+- "rótulos / etiquetas / rotular"  -> set_labels; "mapa de fundo / satélite / google"  -> add_basemap
+- "esconder / ocultar / desligar camada"  -> set_layer_visibility visible=false
+- "layout / prancha / mapa para impressão"  -> create_print_layout; "exportar/imprimir em PDF"  -> export_layout
+- Cores em português: converta para #rrggbb (azul #1f78b4, vermelho #e31a1c, verde #33a02c,
+  amarelo #ffd92f, laranja #ff7f00, roxo #6a3d9a, preto #000000, branco #ffffff, cinza #969696)
 - "copiar / duplicar / clonar / fazer cópia da camada"  -> duplicate_layer
 - "campo", "coluna" e "atributo" são a mesma coisa
 - "criar / adicionar / incluir campo"  -> add_field; "texto"=String, "inteiro"=Integer,
@@ -224,7 +262,7 @@ COMO O USUÁRIO COSTUMA FALAR (traduza para as ações acima):
   pelo plugin; pode planejá-las normalmente quando o usuário pedir.
 
 REGRAS:
-- Prefira as ações dedicadas (1-21, 24-48) quando existir uma para a tarefa.
+- Prefira as ações dedicadas (1-21, 24-66) quando existir uma para a tarefa.
 - Se a tarefa pedida não corresponder a nenhuma ação dedicada, use list_algorithms
   para encontrar o algoritmo certo e depois run_algorithm para executá-lo — NUNCA
   diga que algo "não é possível" sem antes tentar essa rota genérica.

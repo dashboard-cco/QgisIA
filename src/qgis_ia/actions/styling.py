@@ -24,6 +24,9 @@ XYZ_SOURCES = {
         "tile/%7Bz%7D/%7By%7D/%7Bx%7D", 19),
     "carto_light": ("https://a.basemaps.cartocdn.com/light_all/%7Bz%7D/%7Bx%7D/%7By%7D.png", 20),
     "carto_dark": ("https://a.basemaps.cartocdn.com/dark_all/%7Bz%7D/%7Bx%7D/%7By%7D.png", 20),
+    "google_satellite": ("https://mt1.google.com/vt/lyrs%3Ds%26x%3D%7Bx%7D%26y%3D%7By%7D%26z%3D%7Bz%7D", 20),
+    "google_hybrid": ("https://mt1.google.com/vt/lyrs%3Dy%26x%3D%7Bx%7D%26y%3D%7By%7D%26z%3D%7Bz%7D", 20),
+    "google_maps": ("https://mt1.google.com/vt/lyrs%3Dm%26x%3D%7Bx%7D%26y%3D%7By%7D%26z%3D%7Bz%7D", 20),
 }
 
 
@@ -121,9 +124,9 @@ def set_categorized_style(layer_name, field, colors=None):
 
 def set_graduated_style(layer_name, field, classes=5, mode="EqualInterval",
                         color_start="#f7fbff", color_end="#08306b"):
-    """Classes graduadas sobre um campo numérico."""
+    """Classes graduadas sobre um campo numérico ou expressão (ex.: $area)."""
     layer = _vector(layer_name)
-    if layer.fields().indexOf(field) < 0:
+    if layer.fields().indexOf(field) < 0 and not any(c in field for c in '$()"+-*/'):
         raise ValueError(f"Campo não encontrado em '{layer_name}': {field}")
     modes = {
         "EqualInterval": QgsGraduatedSymbolRenderer.EqualInterval,
@@ -141,14 +144,27 @@ def set_graduated_style(layer_name, field, classes=5, mode="EqualInterval",
         layer, field, int(classes), modes[mode], _symbol(layer), ramp)
     if renderer is None or not renderer.ranges():
         raise RuntimeError(f"Não consegui classificar '{field}'. Ele é numérico?")
+    try:  # rótulos da legenda sem casas decimais inúteis (100 - 900, não 100,0000)
+        vals = [abs(r.upperValue()) for r in renderer.ranges()]
+        casas = 0 if max(vals) >= 100 else (1 if max(vals) >= 10 else 2)
+        metodo = renderer.classificationMethod()
+        metodo.setLabelPrecision(casas)
+        metodo.setLabelTrimTrailingZeroes(True)
+        renderer.updateRangeLabels()
+    except Exception:
+        pass
     layer.setRenderer(renderer)
     _refresh(layer)
     return {"success": True, "layer": layer_name, "field": field,
             "classes": len(renderer.ranges()), "mode": mode}
 
 
-def set_labels(layer_name, field=None, enabled=True, size=10, color="#000000"):
-    """Liga ou desliga rótulos a partir de um campo (ou expressão)."""
+def set_labels(layer_name, field=None, enabled=True, size=10, color="#000000",
+               bold=False, buffer=True):
+    """Liga ou desliga rótulos a partir de um campo (ou expressão).
+
+    buffer: contorno branco em volta do texto, para ler sobre qualquer fundo.
+    """
     layer = _vector(layer_name)
     if not enabled:
         layer.setLabelsEnabled(False)
@@ -163,9 +179,17 @@ def set_labels(layer_name, field=None, enabled=True, size=10, color="#000000"):
     text_format = QgsTextFormat()
     font = QFont()
     font.setPointSize(int(size))
+    font.setBold(bool(bold))
     text_format.setFont(font)
     text_format.setSize(float(size))
     text_format.setColor(_color(color))
+    if buffer:
+        from qgis.core import QgsTextBufferSettings
+        buf = QgsTextBufferSettings()
+        buf.setEnabled(True)
+        buf.setSize(0.8)
+        buf.setColor(QColor("#ffffff"))
+        text_format.setBuffer(buf)
     settings.setFormat(text_format)
 
     layer.setLabeling(QgsVectorLayerSimpleLabeling(settings))
@@ -276,5 +300,5 @@ TOOLS = {
     "set_layer_opacity": set_layer_opacity,
     "add_basemap": add_basemap,
     "set_canvas_extent": set_canvas_extent,
-    "create_print_layout": create_print_layout,
 }
+# create_print_layout completo (legenda, escala, norte) fica em actions/mapas.py

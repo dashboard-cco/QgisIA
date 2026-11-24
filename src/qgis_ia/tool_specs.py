@@ -52,8 +52,8 @@ TOOLS = {
         _obj({"width": {"type": "integer", "description": "Largura em px (100-4000, padrão 1200)"},
               "height": {"type": "integer", "description": "Altura em px (100-4000, padrão 800)"}})),
     "set_layer_visibility": (
-        "Liga ou desliga a visibilidade de uma camada.",
-        _obj({"layer_name": _LAYER, "visible": _B}, ["layer_name"])),
+        "Liga ou desliga a visibilidade de uma camada (sem layer_name: todas).",
+        _obj({"layer_name": _LAYER, "visible": _B})),
     "save_project": (
         "Salva o projeto. Informe 'path' se ele ainda não tem arquivo. [grava arquivo]",
         _obj({"path": _s("Caminho do .qgz/.qgs (opcional)")})),
@@ -300,7 +300,8 @@ TOOLS = {
     "set_labels": (
         "Liga ou desliga rótulos a partir de um campo ou expressão.",
         _obj({"layer_name": _LAYER, "field": _s("Nome do campo ou expressão QGIS"),
-              "enabled": _B, "size": _N, "color": _S},
+              "enabled": _B, "size": _N, "color": _S, "bold": _B,
+              "buffer": _s("Contorno branco no texto (padrão true)")},
              ["layer_name"])),
     "set_layer_opacity": (
         "Opacidade da camada, de 0 (transparente) a 1 (opaca).",
@@ -309,7 +310,8 @@ TOOLS = {
         "Adiciona um mapa de fundo XYZ (precisa de internet).",
         _obj({"source": {"type": "string",
                          "enum": ["osm", "opentopomap", "esri_satellite", "esri_topo",
-                                  "carto_light", "carto_dark"]},
+                                  "carto_light", "carto_dark", "google_satellite",
+                                  "google_hybrid", "google_maps"]},
               "layer_name": _S})),
     "set_canvas_extent": (
         "Move o mapa para a extensão informada.",
@@ -317,10 +319,53 @@ TOOLS = {
               "crs": _s("CRS das coordenadas, ex.: EPSG:4326 (padrão: o do mapa)")},
              ["xmin", "ymin", "xmax", "ymax"])),
     "create_print_layout": (
-        "Cria um layout A4 com um mapa e, se informado, um título.",
-        _obj({"layout_name": _S, "title": _S,
-              "orientation": {"type": "string", "enum": ["landscape", "portrait"]}},
-             ["layout_name"])),
+        "Cria um layout de impressão pronto: título, mapa com o enquadramento atual, "
+        "legenda, barra de escala e seta de norte. Abre o layout se houver interface.",
+        _obj({"layout_name": _s("Nome do layout (padrão: o título ou 'Mapa')"), "title": _S,
+              "subtitle": _S,
+              "orientation": {"type": "string", "enum": ["landscape", "portrait"]},
+              "page_size": _s("A0 a A5, Letter... (padrão A4)"),
+              "legend": _B, "scalebar": _B, "north_arrow": _B, "open_designer": _B})),
+
+    # -------------------------------------------------------------- mapas
+    "update_symbol": (
+        "Ajusta o símbolo atual sem recriar o estilo: cor (vira símbolo único), contorno, "
+        "espessura do contorno, tamanho do ponto/espessura da linha, sem preenchimento.",
+        _obj({"layer_name": _LAYER, "color": _S, "outline_color": _S,
+              "outline_width": _s("mm"), "size": _s("mm"), "no_fill": _B},
+             ["layer_name"])),
+    "move_layer": (
+        "Muda a ordem de desenho da camada.",
+        _obj({"layer_name": _LAYER,
+              "position": {"type": "string", "enum": ["top", "bottom", "up", "down"]}},
+             ["layer_name", "position"])),
+    "zoom_full": ("Mostra todas as camadas do projeto no mapa.", _obj()),
+    "set_scale": (
+        "Muda a escala do mapa (5000 = 1:5.000).",
+        _obj({"scale": _N}, ["scale"])),
+    "export_map_image": (
+        "Salva o mapa atual (canvas) como imagem. Sem caminho: pasta do projeto. [grava arquivo]",
+        _obj({"output_path": _S})),
+    "add_layout_item": (
+        "Acrescenta legenda, escala, norte, título ou texto a um layout existente.",
+        _obj({"item": {"type": "string",
+                       "enum": ["legend", "scalebar", "north_arrow", "title", "text"]},
+              "layout_name": _s("Opcional se o projeto tem um só layout"), "text": _S},
+             ["item"])),
+    "remove_layout": (
+        "Apaga um layout do projeto. [destrutivo]",
+        _obj({"layout_name": _S}, ["layout_name"])),
+    "list_print_layouts": ("Lista os layouts de impressão do projeto.", _obj()),
+    "open_layout": (
+        "Abre um layout na janela de edição de layouts.",
+        _obj({"layout_name": _S})),
+    "export_layout": (
+        "Exporta um layout para pdf, png, jpg, tif ou svg. Sem caminho: pasta do projeto "
+        "com o nome do layout; uma pasta também serve. [grava arquivo]",
+        _obj({"layout_name": _s("Opcional se o projeto tem um só layout"),
+              "output_path": _S,
+              "format": {"type": "string", "enum": ["pdf", "png", "jpg", "tif", "svg"]},
+              "dpi": _I})),
 
     # ----------------------------------------------------------- avançado
     "execute_code": (

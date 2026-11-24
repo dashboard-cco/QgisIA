@@ -56,7 +56,7 @@ o servidor, o arquivo é apagado e o token deixa de valer.
 - As ações rodam no thread principal do QGIS. Operações pesadas deixam a interface
   parada enquanto executam.
 
-## As 54 ferramentas
+## As ferramentas (79)
 
 **Inspeção** — `ping`, `get_project_info`, `get_layer_info`, `get_features`,
 `get_field_statistics`, `get_unique_values`, `get_raster_stats`, `get_algorithm_help`,
@@ -76,9 +76,27 @@ o servidor, o arquivo é apagado e o token deixa de valer.
 `run_algorithm` alcança **qualquer** algoritmo do Processing (native, qgis, gdal, grass).
 Use `list_algorithms` para achar o id e `get_algorithm_help` para os nomes dos parâmetros.
 
-**Simbologia e mapas** — `set_layer_style`, `set_categorized_style`,
-`set_graduated_style`, `set_labels`, `set_layer_opacity`, `list_layouts`,
-`create_print_layout`, `export_layout_pdf`, `export_layout_image`
+**Simbologia e mapas** — `set_layer_style`, `update_symbol`, `set_categorized_style`,
+`set_graduated_style`, `set_labels`, `set_layer_opacity`, `add_basemap` (inclui Google
+satélite/híbrido), `move_layer`, `zoom_full`, `set_scale`, `export_map_image`
+
+**Layouts** — `create_print_layout` (título, legenda, escala e norte prontos),
+`add_layout_item`, `export_layout` (pdf/png/jpg/tif/svg, caminho automático),
+`open_layout`, `list_print_layouts`, `remove_layout`, `export_layout_pdf`, `export_layout_image`
+
+### Comandos simples de mapas (no chat, sem IA)
+
+| Assunto | Exemplos |
+|---|---|
+| Cor | `pintar lotes de azul` · `mudar a cor de vias para vermelho escuro` · `deixar lotes sem preenchimento` |
+| Contorno e tamanho | `contorno preto de 0.5 em lotes` · `sem contorno` · `espessura 1.5 em vias` · `tamanho dos pontos 4` |
+| Transparência | `transparência 30% em lotes` · `deixar lotes semitransparente` · `opacidade 80%` |
+| Cores por campo | `cores por bairro em lotes` · `classificar lotes por pop em 5 classes em tons de vermelho` · `graduar lotes por area do amarelo ao vermelho` |
+| Rótulos | `rótulos com nome em lotes` · `rotular vias por nome tamanho 12 negrito` · `tirar rótulos` |
+| Mapa de fundo | `mapa de fundo satélite` · `colocar imagem de satélite do google` · `fundo claro` |
+| Mapa | `zoom total` · `escala 1:5000` · `trazer lotes para frente` · `esconder camada vias` · `salvar projeto` |
+| Layout | `criar layout A3 retrato com título "Coleta 2026"` · `criar layout sem legenda` · `adicionar texto "Fonte: SLU" no layout` |
+| Exportar | `exportar layout em pdf` · `exportar layout Mapa em png com 150 dpi para C:\saida` · `salvar mapa em pdf` (cria o layout se não houver) · `salvar imagem do mapa` |
 
 **Avançado** — `execute_code` (desligada por padrão)
 

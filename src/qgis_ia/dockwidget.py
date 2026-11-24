@@ -242,7 +242,9 @@ class QgisIaDockWidget(QDockWidget):
             camadas.append(l.name())
             if isinstance(l, QgsVectorLayer):
                 campos[l.name()] = [f.name() for f in l.fields()]
-        return {"camadas": camadas, "campos": campos, "ativa": self._camada_ativa()}
+        layouts = [l.name() for l in QgsProject.instance().layoutManager().printLayouts()]
+        return {"camadas": camadas, "campos": campos, "ativa": self._camada_ativa(),
+                "layouts": layouts}
 
     def _contexto_ia(self):
         """Texto com camadas, tipos, campos e estado de edição para a IA."""
@@ -266,6 +268,8 @@ class QgisIaDockWidget(QDockWidget):
                               f"{', ' + ', '.join(extra) if extra else ''}] campos: {campos}")
             else:
                 linhas.append(f"- {l.name()} [raster, {l.crs().authid()}]")
+        layouts = [l.name() for l in QgsProject.instance().layoutManager().printLayouts()]
+        linhas.append("Layouts: " + (", ".join(layouts) if layouts else "nenhum"))
         return "\n".join(linhas)
 
     def _confirmar(self, plano):

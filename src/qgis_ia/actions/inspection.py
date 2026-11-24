@@ -168,7 +168,16 @@ def render_map(width=1200, height=800):
     return {"mime": "image/png", "width": width, "height": height, "data_base64": data}
 
 
-def set_layer_visibility(layer_name, visible=True):
+def set_layer_visibility(layer_name=None, visible=True):
+    """Liga/desliga a camada no mapa. Sem layer_name: todas as camadas."""
+    if not layer_name:
+        root = QgsProject.instance().layerTreeRoot()
+        nodes = root.findLayers()
+        for node in nodes:
+            node.setItemVisibilityChecked(bool(visible))
+        for grupo in root.findGroups(True):
+            grupo.setItemVisibilityChecked(True)
+        return {"success": True, "layers": len(nodes), "visible": bool(visible)}
     layer = _get_layer(layer_name)
     node = QgsProject.instance().layerTreeRoot().findLayer(layer.id())
     if node is None:
